@@ -1,0 +1,15 @@
+# Core
+numpy>=1.23
+opencv-python>=4.7
+Pillow>=9.5
+
+# PyTorch (建议按你的 CUDA/驱动安装匹配版本；这里给最小约束，避免硬锁版本)
+torch>=2.0
+torchvision>=0.15
+
+# Utilities
+tqdm>=4.66
+matplotlib>=3.7
+
+# Optional (logging)
+tensorboard>=2.14
