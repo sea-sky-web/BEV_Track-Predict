@@ -95,6 +95,13 @@ class ColabPlaywrightLauncher:
                 "and: python -m playwright install chromium"
             )
 
+        if self.config.playwright_attach_existing_chrome:
+            cdp_url = (self.config.playwright_cdp_url or "").strip()
+            if not cdp_url:
+                raise RuntimeError("PLAYWRIGHT_CDP_URL is required when PLAYWRIGHT_ATTACH_EXISTING_CHROME=true")
+            # Fast-fail before starting Playwright internals.
+            self._ensure_cdp_endpoint_reachable(cdp_url)
+
         try:
             self._playwright = sync_playwright().start()
             if self.config.playwright_attach_existing_chrome:
@@ -380,7 +387,6 @@ class ColabPlaywrightLauncher:
         if not cdp_url:
             raise RuntimeError("PLAYWRIGHT_CDP_URL is required when PLAYWRIGHT_ATTACH_EXISTING_CHROME=true")
 
-        self._ensure_cdp_endpoint_reachable(cdp_url)
         self.logger.info("Attaching Playwright to existing Chrome via CDP: %s", cdp_url)
         self._browser = self._playwright.chromium.connect_over_cdp(cdp_url)
         if not self._browser.contexts:
