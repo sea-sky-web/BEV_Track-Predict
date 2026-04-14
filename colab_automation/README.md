@@ -36,14 +36,21 @@ colab_automation/
 
 ## 从零启动
 
-1. 安装依赖：
+1. 使用 `.venv` 虚拟环境（Windows）：
 
-```bash
-pip install -r colab_automation/requirements.txt
-python -m playwright install chromium
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
 ```
 
-2. 准备配置：
+2. 安装依赖（务必用 `.venv` 的 python）：
+
+```bash
+.\.venv\Scripts\python.exe -m pip install -r colab_automation/requirements.txt
+.\.venv\Scripts\python.exe -m playwright install chromium
+```
+
+3. 准备配置：
 
 ```bash
 cp colab_automation/.env.example colab_automation/.env
@@ -56,12 +63,12 @@ cp colab_automation/.env.example colab_automation/.env
 - `RESULT_DIR`：训练结果文件同步目录
 - `GIT_BRANCH`：推送目标分支
 
-3. 选择浏览器控制模式（两选一）：
+4. 选择浏览器控制模式（两选一）：
 
 - 模式 A：启动新实例（默认）
   1. 执行登录初始化脚本：
      ```bash
-     python -m colab_automation.init_colab_login
+     .\.venv\Scripts\python.exe -m colab_automation.init_colab_login
      ```
   2. 脚本会打开带持久化 profile 的浏览器窗口。手动登录后回车保存。
 
@@ -76,10 +83,10 @@ cp colab_automation/.env.example colab_automation/.env
      - `PLAYWRIGHT_CDP_URL=http://127.0.0.1:9222`
      - `PLAYWRIGHT_ATTACH_NEW_TAB=true`（建议保持 true，避免污染你当前标签页）
 
-4. 启动自动闭环：
+5. 启动自动闭环：
 
 ```bash
-python -m colab_automation.run_orchestrator --log-level INFO
+.\.venv\Scripts\python.exe -m colab_automation.run_orchestrator --log-level INFO
 ```
 
 ## 关键配置项（`.env`）
@@ -139,4 +146,3 @@ Notebook 需要稳定输出以下四个文件：
    - 检测 Colab 卡死、kernel 无响应并自动重启流程。
 5. 增加实验调度：
    - 支持多配置任务队列与优先级。
-
