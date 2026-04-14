@@ -6,7 +6,6 @@
 import json
 from pathlib import Path
 from typing import List, Tuple, Dict, Any
-
 import numpy as np
 import torch
 from PIL import Image

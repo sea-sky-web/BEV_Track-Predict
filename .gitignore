@@ -18,3 +18,7 @@ outputs/
 # Model checkpoints and logs
 *.pth
 training_log.txt
+
+# Colab automation local runtime artifacts
+colab_automation/.env
+colab_automation/runtime/
