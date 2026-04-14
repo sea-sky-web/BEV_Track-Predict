@@ -6,6 +6,8 @@ import logging
 import re
 import time
 from datetime import datetime, timezone
+from urllib.error import URLError
+from urllib.request import urlopen
 from typing import Any, Optional
 
 try:
@@ -93,16 +95,22 @@ class ColabPlaywrightLauncher:
                 "and: python -m playwright install chromium"
             )
 
-        self._playwright = sync_playwright().start()
-        if self.config.playwright_attach_existing_chrome:
-            self._start_by_attach_cdp()
-        else:
-            self._start_by_persistent_context()
+        try:
+            self._playwright = sync_playwright().start()
+            if self.config.playwright_attach_existing_chrome:
+                self._start_by_attach_cdp()
+            else:
+                self._start_by_persistent_context()
 
-        assert self._page is not None
-        self._page.set_default_timeout(self.config.selector_timeout_ms)
-        self._page.on("dialog", self._handle_dialog)
-        return self
+            assert self._page is not None
+            self._page.set_default_timeout(self.config.selector_timeout_ms)
+            self._page.on("dialog", self._handle_dialog)
+            return self
+        except Exception:
+            # Ensure every failed startup attempt fully releases Playwright
+            # so retry attempts do not hit stale event-loop state.
+            self.close()
+            raise
 
     def close(self) -> None:
         """Close browser resources."""
@@ -372,6 +380,7 @@ class ColabPlaywrightLauncher:
         if not cdp_url:
             raise RuntimeError("PLAYWRIGHT_CDP_URL is required when PLAYWRIGHT_ATTACH_EXISTING_CHROME=true")
 
+        self._ensure_cdp_endpoint_reachable(cdp_url)
         self.logger.info("Attaching Playwright to existing Chrome via CDP: %s", cdp_url)
         self._browser = self._playwright.chromium.connect_over_cdp(cdp_url)
         if not self._browser.contexts:
@@ -385,3 +394,16 @@ class ColabPlaywrightLauncher:
             self._page = self._context.pages[0]
             self._created_new_page = False
         self._owns_context = False
+
+    def _ensure_cdp_endpoint_reachable(self, cdp_url: str) -> None:
+        version_url = cdp_url.rstrip("/") + "/json/version"
+        try:
+            with urlopen(version_url, timeout=3) as resp:  # nosec B310
+                status = getattr(resp, "status", 200)
+                if int(status) >= 400:
+                    raise RuntimeError(f"CDP endpoint returned HTTP {status}: {version_url}")
+        except URLError as exc:
+            raise RuntimeError(
+                "Cannot reach Chrome CDP endpoint. "
+                f"Expected {version_url}. Start Chrome with --remote-debugging-port=9222."
+            ) from exc
