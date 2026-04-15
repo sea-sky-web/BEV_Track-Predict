@@ -319,6 +319,9 @@ class ColabExecutor:
             start_time = time.time()
             
             while time.time() - start_time < max_wait:
+                # 处理Google Drive权限请求
+                self.handle_drive_permission()
+                
                 # 检查是否还有单元正在运行（尝试多种选择器）
                 running_cells = self.page.locator('.running-indicator').count()
                 if running_cells == 0:
@@ -338,7 +341,7 @@ class ColabExecutor:
                 
                 elapsed = int(time.time() - start_time)
                 self.logger.info(f"执行中... ({elapsed}s)")
-                time.sleep(10)
+                time.sleep(5)
             
             self.logger.error("执行超时")
             return False, self.execution_results
@@ -412,3 +415,95 @@ class ColabExecutor:
             self.logger.error(f"获取页面数据失败: {e}")
         
         return data
+    
+    def handle_drive_permission(self) -> bool:
+        """处理Google Drive权限请求弹窗"""
+        self.logger.info("检查是否有Google Drive权限请求...")
+        
+        try:
+            # 等待可能出现的权限请求弹窗
+            max_wait = 30  # 最多等待30秒
+            start_time = time.time()
+            
+            while time.time() - start_time < max_wait:
+                elapsed = int(time.time() - start_time)
+                
+                # 检查Google Drive权限请求弹窗
+                permission_selectors = [
+                    'colab-dialog:has-text("允许此笔记本访问")',
+                    'div[role="dialog"]:has-text("允许此笔记本访问")',
+                    'paper-dialog:has-text("允许此笔记本访问")',
+                    'button:has-text("连接")',
+                    'button:has-text("Connect to Google Drive")',
+                ]
+                
+                found_permission_dialog = False
+                for selector in permission_selectors:
+                    try:
+                        elements = self.page.locator(selector)
+                        if elements.count() > 0 and elements.first.is_visible():
+                            found_permission_dialog = True
+                            self.logger.info(f"找到Google Drive权限请求，使用选择器: {selector}")
+                            
+                            # 找到允许/连接按钮并点击
+                            allow_button = None
+                            allow_selectors = [
+                                'button:has-text("连接")',
+                                'button:has-text("允许")',
+                                'button:has-text("Connect")',
+                                'button:has-text("Allow")',
+                                'colab-dialog-footer button:last-child',
+                            ]
+                            
+                            for btn_selector in allow_selectors:
+                                try:
+                                    btn = self.page.locator(btn_selector).first
+                                    if btn.is_visible():
+                                        allow_button = btn
+                                        self.logger.info(f"找到允许按钮，使用选择器: {btn_selector}")
+                                        break
+                                except Exception:
+                                    continue
+                            
+                            if allow_button:
+                                self.logger.info("点击连接按钮允许Google Drive访问")
+                                allow_button.click()
+                                time.sleep(2)
+                            else:
+                                self.logger.warning("未找到允许按钮")
+                            
+                            break
+                    except Exception:
+                        continue
+                
+                if found_permission_dialog:
+                    break
+                
+                # 检查是否需要点击Continue
+                continue_selectors = [
+                    'button:has-text("Continue")',
+                    'button:has-text("继续")',
+                    'input[type="submit"]',
+                ]
+                
+                for selector in continue_selectors:
+                    try:
+                        btn = self.page.locator(selector).first
+                        if btn.is_visible():
+                            self.logger.info(f"找到Continue按钮，点击它")
+                            btn.click()
+                            time.sleep(2)
+                    except Exception:
+                        continue
+                
+                time.sleep(1)
+                self.logger.debug(f"等待权限请求... ({elapsed}s)")
+            
+            self.logger.info("Google Drive权限处理完成")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"处理Google Drive权限失败: {e}")
+            import traceback
+            self.logger.error(f"错误详情: {traceback.format_exc()}")
+            return False
