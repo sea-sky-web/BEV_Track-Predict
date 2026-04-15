@@ -98,7 +98,7 @@ class ColabExecutor:
             return False
     
     def connect_runtime(self, gpu_type: str = "A100", high_ram: bool = True) -> bool:
-        """连接Colab运行时（兼容新版Colab，修复下拉菜单问题）
+        """连接Colab运行时（简化版本，提示用户手动配置）
         
         Args:
             gpu_type: GPU类型，支持 "T4", "P100", "A100", "A00"
@@ -110,266 +110,39 @@ class ColabExecutor:
         self.logger.info(f"尝试连接运行时: GPU={gpu_type}, HighRAM={high_ram}")
         
         try:
-            # 等待页面完全加载（2-3秒）
-            self.logger.info("等待页面加载完成...")
+            # 等待页面完全加载
             time.sleep(3)
             
-            # 点击连接按钮（尝试多种选择器）
-            connect_button = None
-            button_selectors = [
-                'colab-connect-button',
-                'div.goog-menu-button:has-text("连接")',
-                'button:has-text("连接")',
-                '[role="button"]:has-text("连接")',
-                'div:has-text("连接")',
-            ]
+            # 检查当前运行时状态
+            if self.is_runtime_connected():
+                self.logger.info("运行时已连接")
+                return True
             
-            for selector in button_selectors:
-                try:
-                    button = self.page.locator(selector).first
-                    if button.is_visible():
-                        connect_button = button
-                        self.logger.info(f"找到连接按钮，使用选择器: {selector}")
-                        break
-                except Exception:
-                    continue
+            # 提示用户手动配置运行时
+            self.logger.warning("=" * 60)
+            self.logger.warning("请在浏览器中手动配置运行时：")
+            self.logger.warning(f"1. 点击'连接'按钮")
+            self.logger.warning(f"2. 选择'更改运行时类型'")
+            self.logger.warning(f"3. 选择硬件加速器: GPU")
+            self.logger.warning(f"4. 选择GPU类型: {gpu_type}")
+            self.logger.warning(f"5. 勾选高RAM选项（如果需要）")
+            self.logger.warning(f"6. 点击保存")
+            self.logger.warning("=" * 60)
             
-            if not connect_button:
-                self.logger.error("未找到连接按钮")
-                return False
-            
-            # 点击连接按钮（先尝试展开下拉菜单）
-            self.logger.info("点击连接按钮展开下拉菜单")
-            connect_button.click()
-            time.sleep(2)
-            
-            # 在当前页面查找"更改运行时"选项（使用更广泛的选择器）
-            self.logger.info("查找'更改运行时'选项...")
-            change_runtime_option = None
-            
-            # 获取所有菜单项并检查文本
-            menu_items = self.page.locator('[role="menuitem"]').all()
-            self.logger.info(f"找到 {len(menu_items)} 个菜单项")
-            
-            for i, item in enumerate(menu_items):
-                try:
-                    text = item.inner_text()
-                    self.logger.debug(f"菜单项{i}: {text}")
-                    if "更改运行时" in text or "Change runtime" in text or "Runtime type" in text:
-                        change_runtime_option = item
-                        self.logger.info(f"找到'更改运行时'选项: {text}")
-                        break
-                except Exception:
-                    continue
-            
-            # 如果没找到，尝试其他选择器
-            if not change_runtime_option:
-                option_selectors = [
-                    'div.goog-menuitem:has-text("更改运行时")',
-                    'div.goog-menuitem-content:has-text("更改运行时")',
-                    'colab-runtime-menu-item',
-                ]
-                
-                for selector in option_selectors:
-                    try:
-                        option = self.page.locator(selector).first
-                        if option.is_visible():
-                            text = option.inner_text()
-                            change_runtime_option = option
-                            self.logger.info(f"找到'更改运行时'选项，使用选择器: {selector}, 文本: {text}")
-                            break
-                    except Exception:
-                        continue
-            
-            if change_runtime_option:
-                self.logger.info("点击'更改运行时'选项")
-                change_runtime_option.click()
-                time.sleep(2)
-            else:
-                self.logger.warning("未找到'更改运行时'选项，尝试直接选择运行时")
-            
-            # 等待运行时配置对话框出现（使用更广泛的选择器）
-            self.logger.info("等待运行时配置对话框...")
-            dialog_found = False
-            dialog_selectors = [
-                'colab-runtime-selector',
-                'div[role="dialog"]',
-                '.modal-dialog',
-                '[aria-label*="运行时"]',
-                '[aria-label*="Runtime"]',
-                'paper-dialog',
-                '.mdc-dialog',
-                'colab-dialog',
-            ]
+            # 等待用户手动配置
+            wait_time = 60  # 1分钟等待时间
             start_time = time.time()
-            timeout = 20  # 减少超时时间
             
-            while time.time() - start_time < timeout:
-                for selector in dialog_selectors:
-                    try:
-                        elements = self.page.locator(selector)
-                        if elements.count() > 0 and elements.first.is_visible():
-                            self.logger.info(f"找到运行时配置对话框，使用选择器: {selector}")
-                            dialog_found = True
-                            break
-                    except Exception:
-                        continue
-                if dialog_found:
-                    break
-                time.sleep(1)
-                elapsed = int(time.time() - start_time)
-                self.logger.info(f"等待对话框中... ({elapsed}s)")
-            
-            if not dialog_found:
-                self.logger.warning("未找到运行时配置对话框，尝试直接连接")
-                # 如果找不到对话框，尝试直接点击连接按钮
-                try:
-                    connect_button.click()
-                    time.sleep(5)
-                    if self.is_runtime_connected():
-                        self.logger.info("直接连接成功")
-                        return True
-                except Exception as e:
-                    self.logger.error(f"直接连接失败: {e}")
-                return False
-            
-            # 选择硬件加速器为GPU
-            self.logger.info("选择硬件加速器为GPU...")
-            accelerator_select = None
-            accelerator_selectors = [
-                'select#accelerator',
-                'select[name="accelerator"]',
-                'colab-select[name="accelerator"]',
-            ]
-            
-            for selector in accelerator_selectors:
-                try:
-                    select = self.page.locator(selector).first
-                    if select.is_visible():
-                        accelerator_select = select
-                        self.logger.info(f"找到加速器选择框，使用选择器: {selector}")
-                        break
-                except Exception:
-                    continue
-            
-            if accelerator_select:
-                self.logger.info("选择GPU加速器")
-                accelerator_select.select_option("GPU")
-                time.sleep(1)
-            else:
-                self.logger.warning("未找到加速器选择框")
-            
-            # 选择GPU类型
-            self.logger.info(f"选择GPU类型: {gpu_type}...")
-            gpu_select = None
-            gpu_selectors = [
-                'select#gpu-type',
-                'select[name="gpuType"]',
-                'colab-select[name="gpuType"]',
-            ]
-            
-            for selector in gpu_selectors:
-                try:
-                    select = self.page.locator(selector).first
-                    if select.is_visible():
-                        gpu_select = select
-                        self.logger.info(f"找到GPU类型选择框，使用选择器: {selector}")
-                        break
-                except Exception:
-                    continue
-            
-            if gpu_select:
-                # 获取所有选项并选择匹配的
-                options = gpu_select.locator('option').all()
-                selected = False
-                for option in options:
-                    try:
-                        option_text = option.inner_text()
-                        if gpu_type.lower() in option_text.lower():
-                            gpu_select.select_option(label=option_text)
-                            self.logger.info(f"选择GPU类型: {option_text}")
-                            selected = True
-                            break
-                    except Exception:
-                        continue
-                
-                if not selected:
-                    self.logger.warning(f"未找到{gpu_type}，选择第一个GPU选项")
-                    gpu_select.select_option(index=1)
-                time.sleep(1)
-            else:
-                self.logger.warning("未找到GPU类型选择框")
-            
-            # 选择高RAM（如果可用）
-            if high_ram:
-                self.logger.info("选择高RAM...")
-                high_ram_checkbox = None
-                checkbox_selectors = [
-                    'input[type="checkbox"][name="highram"]',
-                    'input[type="checkbox"]:has-text("高RAM")',
-                    'input[type="checkbox"]:has-text("High RAM")',
-                ]
-                
-                for selector in checkbox_selectors:
-                    try:
-                        checkbox = self.page.locator(selector).first
-                        if checkbox.is_visible():
-                            high_ram_checkbox = checkbox
-                            self.logger.info(f"找到高RAM复选框，使用选择器: {selector}")
-                            break
-                    except Exception:
-                        continue
-                
-                if high_ram_checkbox:
-                    is_checked = high_ram_checkbox.is_checked()
-                    if not is_checked:
-                        self.logger.info("勾选高RAM选项")
-                        high_ram_checkbox.click()
-                        time.sleep(1)
-                    else:
-                        self.logger.info("高RAM已勾选")
-                else:
-                    self.logger.warning("未找到高RAM复选框")
-            
-            # 点击保存按钮
-            self.logger.info("点击保存按钮...")
-            save_button = None
-            save_selectors = [
-                'button:has-text("保存")',
-                'button:has-text("Save")',
-                'colab-dialog-footer button',
-            ]
-            
-            for selector in save_selectors:
-                try:
-                    button = self.page.locator(selector).first
-                    if button.is_visible():
-                        save_button = button
-                        self.logger.info(f"找到保存按钮，使用选择器: {selector}")
-                        break
-                except Exception:
-                    continue
-            
-            if save_button:
-                self.logger.info("点击保存按钮应用配置")
-                save_button.click()
-            else:
-                self.logger.error("未找到保存按钮")
-                return False
-            
-            # 等待连接完成
-            self.logger.info("等待运行时连接完成...")
-            start_time = time.time()
-            max_wait = 300  # 5分钟
-            
-            while time.time() - start_time < max_wait:
+            while time.time() - start_time < wait_time:
                 if self.is_runtime_connected():
-                    self.logger.info("✅ 运行时连接成功")
+                    self.logger.info("✅ 用户已成功连接运行时")
                     return True
+                elapsed = int(time.time() - start_time)
+                remaining = wait_time - elapsed
+                self.logger.info(f"等待用户配置运行时... ({remaining}s 剩余)")
                 time.sleep(5)
-                self.logger.info(f"等待连接中... ({int(time.time() - start_time)}s)")
             
-            self.logger.error("运行时连接超时")
+            self.logger.warning("用户未在规定时间内配置运行时")
             return False
             
         except Exception as e:
