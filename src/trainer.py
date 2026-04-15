@@ -158,11 +158,31 @@ class MVDetTrainer:
                 # 总损失
                 loss = bev_loss + alpha * per_view_loss
             
+            if not torch.isfinite(loss):
+                if batch_idx % log_every == 0:
+                    raw_min = float(torch.nan_to_num(map_logits[0, 0], nan=0.0).min().item())
+                    raw_max = float(torch.nan_to_num(map_logits[0, 0], nan=0.0).max().item())
+                    print(
+                        f"[step {self.global_step}] non-finite loss detected, skip update "
+                        f"(bev={bev_loss.item()}, img={per_view_loss.item():.6f}, "
+                        f"pred_raw=[{raw_min:.3f},{raw_max:.3f}])"
+                    )
+                self.global_step += 1
+                continue
+
             # 反向传播
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            self.scheduler.step()
+            if self.amp_enabled:
+                scale_before = self.scaler.get_scale()
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                # 仅在 optimizer 真正更新后推进 LR
+                if self.scaler.get_scale() >= scale_before:
+                    self.scheduler.step()
+            else:
+                loss.backward()
+                self.optimizer.step()
+                self.scheduler.step()
             
             # 记录损失
             losses.append(loss.item())
@@ -213,6 +233,15 @@ class MVDetTrainer:
             self.global_step += 1
         
         # 计算 epoch 平均
+        if not losses:
+            return {
+                "loss": float("nan"),
+                "bev_loss": float("nan"),
+                "img_loss": float("nan"),
+                "pos_mse": float("nan"),
+                "aux_pos_mse": float("nan"),
+            }
+
         return {
             "loss": np.mean(losses),
             "bev_loss": np.mean(bev_losses),
