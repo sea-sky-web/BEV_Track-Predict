@@ -188,7 +188,7 @@ class ColabExecutor:
             else:
                 self.logger.warning("未找到'更改运行时'选项，尝试直接选择运行时")
             
-            # 等待运行时配置对话框出现
+            # 等待运行时配置对话框出现（使用更广泛的选择器）
             self.logger.info("等待运行时配置对话框...")
             dialog_found = False
             dialog_selectors = [
@@ -196,22 +196,41 @@ class ColabExecutor:
                 'div[role="dialog"]',
                 '.modal-dialog',
                 '[aria-label*="运行时"]',
+                '[aria-label*="Runtime"]',
+                'paper-dialog',
+                '.mdc-dialog',
+                'colab-dialog',
             ]
             start_time = time.time()
-            timeout = 30
+            timeout = 20  # 减少超时时间
             
             while time.time() - start_time < timeout:
                 for selector in dialog_selectors:
-                    if self.page.locator(selector).count() > 0:
-                        self.logger.info(f"找到运行时配置对话框，使用选择器: {selector}")
-                        dialog_found = True
-                        break
+                    try:
+                        elements = self.page.locator(selector)
+                        if elements.count() > 0 and elements.first.is_visible():
+                            self.logger.info(f"找到运行时配置对话框，使用选择器: {selector}")
+                            dialog_found = True
+                            break
+                    except Exception:
+                        continue
                 if dialog_found:
                     break
                 time.sleep(1)
+                elapsed = int(time.time() - start_time)
+                self.logger.info(f"等待对话框中... ({elapsed}s)")
             
             if not dialog_found:
-                self.logger.warning("未找到运行时配置对话框")
+                self.logger.warning("未找到运行时配置对话框，尝试直接连接")
+                # 如果找不到对话框，尝试直接点击连接按钮
+                try:
+                    connect_button.click()
+                    time.sleep(5)
+                    if self.is_runtime_connected():
+                        self.logger.info("直接连接成功")
+                        return True
+                except Exception as e:
+                    self.logger.error(f"直接连接失败: {e}")
                 return False
             
             # 选择硬件加速器为GPU
