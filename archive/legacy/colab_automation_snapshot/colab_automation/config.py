@@ -1,4 +1,4 @@
-"""配置加载模块"""
+﻿"""配置加载模块"""
 
 import os
 from dataclasses import dataclass

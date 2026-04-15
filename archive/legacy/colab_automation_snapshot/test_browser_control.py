@@ -1,4 +1,4 @@
-"""测试 Colab 自动化浏览器控制功能"""
+﻿"""测试 Colab 自动化浏览器控制功能"""
 
 import logging
 import sys

@@ -1,4 +1,4 @@
-# scripts/models.py
+# src/models.py
 """
 神经网络模型模块：backbone、heads 和完整网络架构
 """
@@ -191,8 +191,8 @@ class MVDetLikeNet(nn.Module):
     Attributes:
         backbone: 共享的 ResNet50 主干
         img_head: 图像预测头
-        proj_mats: 投影矩阵参数
-        coord: 可学习的坐标编码（可选）
+        proj_mats: 静态投影矩阵 buffer
+        coord: 静态坐标编码 buffer（可选）
         bev_head: BEV 预测头
     """
     
@@ -231,8 +231,8 @@ class MVDetLikeNet(nn.Module):
         # 单视角预测头
         self.img_head = ImgHeadFoot(in_ch=feat_ch, mid_ch=128)
         
-        # 投影矩阵（不参与优化）
-        self.proj_mats = nn.Parameter(proj_mats, requires_grad=False)
+        # 投影矩阵（静态 buffer，不参与优化）
+        self.register_buffer("proj_mats", proj_mats.detach().clone())
         
         # 计算 BEV 融合特征的输入通道数
         in_bev = num_views * feat_ch
@@ -246,7 +246,7 @@ class MVDetLikeNet(nn.Module):
             ys = torch.linspace(-1, 1, self.Wb).view(1, self.Wb).expand(self.Hb, self.Wb)
             coord = torch.stack([ys, xs], dim=0).unsqueeze(0)  # (1, 2, Hb, Wb)
             
-            self.coord = nn.Parameter(coord, requires_grad=False)
+            self.register_buffer("coord", coord)
         else:
             self.coord = None
         
@@ -304,7 +304,7 @@ class MVDetLikeNet(nn.Module):
         
         # 添加坐标编码
         if self.add_coord:
-            coord = self.coord.to(bev_cat.device).expand(B, -1, -1, -1)
+            coord = self.coord.expand(B, -1, -1, -1)
             bev_cat = torch.cat([bev_cat, coord], dim=1)
         
         # BEV 融合预测

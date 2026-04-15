@@ -1,4 +1,4 @@
-"""错误日志收集器"""
+﻿"""错误日志收集器"""
 
 import json
 import logging

@@ -47,6 +47,7 @@ python src/train_main.py --data_root wildtrack --views 0,1,2 --device cuda
 - `--amp`：启用自动混合精度（仅 `cuda` 时有效）
 - `--drop_bad_views`：丢弃投影 `valid_ratio` 低于阈值的视角
 - `--valid_thr`：默认 `0.10`
+- `--lr_init` / `--momentum` / `--weight_decay`：SGD 超参数
 
 输出目录与模型文件：
 
@@ -58,6 +59,25 @@ python src/train_main.py --data_root wildtrack --views 0,1,2 --device cuda
 
 - 每个视角的投影 `valid_ratio`
 - step 级别的 `loss/bev/img/pos_mse/aux_pos_mse`（频率由 `--log_every` 控制）
+
+### 评估入口
+
+评估脚本：`src/evaluate_main.py`
+
+```bash
+python src/evaluate_main.py --data_root wildtrack --views 0,1,2 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda
+```
+
+该脚本与 `src/train_main.py` 使用相同的投影与数据构建链路，输出 `loss/bev_loss/img_loss/pos_mse/aux_pos_mse` 以及模型参数统计。
+
+## 历史探索归档
+
+- 历史训练原型：`archive/legacy/training_prototypes/`
+- Colab 自动化快照：`archive/legacy/colab_automation_snapshot/`
+- 归档索引：`archive/legacy/README.md`
+- 探索记忆文档：`docs/EXPLORATION_MEMORY.md`
+
+`scripts/` 目录不再承载历史训练入口，仅保留活动工具脚本（见 `scripts/README.md`）。
 
 ## 代码模块对应关系
 

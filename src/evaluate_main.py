@@ -1,326 +1,327 @@
 """
-评估轻量化多视角检测（MVDet）模型性能的脚本
+评估脚本：使用与 train_main 一致的数据与投影链路，计算离线损失指标。
 """
 
 import argparse
-import sys
 from pathlib import Path
+from typing import Dict, Tuple
+
+import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
+
+from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_pom, scale_intrinsics
 from config import (
-    DEFAULT_DATA_ROOT, DEFAULT_OUTPUT_DIR,
-    DEFAULT_MAX_FRAMES, DEFAULT_BATCH_SIZE,
-    DEFAULT_BEV_DOWN, DEFAULT_FEAT_H, DEFAULT_FEAT_W,
-    DEFAULT_IMG_H, DEFAULT_IMG_W, DEFAULT_PERSON_H,
     CAM_NAMES,
-    IMG_ORI_W, IMG_ORI_H,
+    DEFAULT_ALPHA,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_BEV_DOWN,
+    DEFAULT_DATA_ROOT,
+    DEFAULT_FEAT_CH,
+    DEFAULT_FEAT_H,
+    DEFAULT_FEAT_W,
+    DEFAULT_IMG_H,
+    DEFAULT_IMG_KSIZE,
+    DEFAULT_IMG_SIGMA,
+    DEFAULT_IMG_W,
+    DEFAULT_MAX_FRAMES,
+    DEFAULT_NUM_WORKERS,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_PERSON_H,
+    DEFAULT_MAP_KSIZE,
+    DEFAULT_MAP_SIGMA,
+    DEFAULT_VALID_THR,
+    IMG_ORI_H,
+    IMG_ORI_W,
 )
-from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_pom
-from geometry import make_worldgrid2worldcoord_mat, build_mvdet_proj_mat, compute_valid_ratio_from_homography
 from dataset import create_wildtrack_dataset
+from geometry import build_mvdet_proj_mat, compute_valid_ratio_from_homography, make_worldgrid2worldcoord_mat
+from loss import GaussianMSE
 from models import create_model
-from trainer import MVDetTrainer
 from utils import build_gaussian_kernel_2d
 
 
-def parse_args():
-    """解析命令行参数"""
-    ap = argparse.ArgumentParser(
-        description="MVDet 模型性能评估脚本"
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="MVDet 风格模型评估脚本（对齐 src 主链路）")
+
+    ap.add_argument("--data_root", type=str, default=DEFAULT_DATA_ROOT, help="Wildtrack 数据集根目录")
+    ap.add_argument("--views", type=str, default="0,1,2", help="使用的视角 ID，例如 0,1,2")
+    ap.add_argument("--drop_bad_views", action="store_true", help="是否丢弃低有效性的视角")
+    ap.add_argument("--valid_thr", type=float, default=DEFAULT_VALID_THR, help="投影有效性阈值")
+
+    ap.add_argument(
+        "--model_path",
+        type=str,
+        default=str(Path(DEFAULT_OUTPUT_DIR) / "model_final.pth"),
+        help="模型权重路径（支持纯 state_dict 或 checkpoint）",
     )
-    
-    # 数据相关
-    ap.add_argument("--data_root", type=str, default=DEFAULT_DATA_ROOT,
-                    help="Wildtrack 数据集根目录")
-    ap.add_argument("--views", type=str, default="0,1,2",
-                    help="使用的视角 ID")
-    ap.add_argument("--drop_bad_views", action="store_true",
-                    help="是否丢弃低有效性的视角")
-    ap.add_argument("--valid_thr", type=float, default=0.10,
-                    help="投影有效性阈值")
-    
-    # 模型相关
-    ap.add_argument("--model_path", type=str, 
-                    default=str(Path(DEFAULT_OUTPUT_DIR) / "model_final.pth"),
-                    help="模型文件路径")
-    ap.add_argument("--device", type=str, default="cuda",
-                    choices=["cuda", "cpu"],
-                    help="计算设备")
-    
-    # 评估参数
-    ap.add_argument("--max_frames", type=int, default=DEFAULT_MAX_FRAMES,
-                    help="评估时使用的最大帧数")
-    ap.add_argument("--batch", type=int, default=DEFAULT_BATCH_SIZE,
-                    help="批大小")
-    
+    ap.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="计算设备")
+
+    ap.add_argument("--max_frames", type=int, default=DEFAULT_MAX_FRAMES, help="评估使用的最大帧数")
+    ap.add_argument("--batch", type=int, default=DEFAULT_BATCH_SIZE, help="批大小")
+    ap.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS, help="数据加载线程数")
+
+    ap.add_argument("--bev_down", type=int, default=DEFAULT_BEV_DOWN, help="BEV 下采样倍数")
+    ap.add_argument("--feat_h", type=int, default=DEFAULT_FEAT_H, help="特征平面高度")
+    ap.add_argument("--feat_w", type=int, default=DEFAULT_FEAT_W, help="特征平面宽度")
+    ap.add_argument("--img_h", type=int, default=DEFAULT_IMG_H, help="输入图像高度")
+    ap.add_argument("--img_w", type=int, default=DEFAULT_IMG_W, help="输入图像宽度")
+    ap.add_argument("--person_h", type=float, default=DEFAULT_PERSON_H, help="人体高度（米）")
+
+    ap.add_argument("--alpha", type=float, default=DEFAULT_ALPHA, help="图像辅助损失权重")
+    ap.add_argument("--map_ksize", type=int, default=DEFAULT_MAP_KSIZE, help="BEV 热图高斯核大小")
+    ap.add_argument("--map_sigma", type=float, default=DEFAULT_MAP_SIGMA, help="BEV 热图高斯标准差")
+    ap.add_argument("--img_ksize", type=int, default=DEFAULT_IMG_KSIZE, help="图像热图高斯核大小")
+    ap.add_argument("--img_sigma", type=float, default=DEFAULT_IMG_SIGMA, help="图像热图高斯标准差")
+    ap.add_argument("--log_every", type=int, default=20, help="每多少步打印一次评估日志")
+
     return ap.parse_args()
 
 
-def evaluate_model(model, dataloader, device):
-    """评估模型性能"""
-    model.eval()
-    total_loss = 0.0
-    count = 0
-    
-    with torch.no_grad():
-        for batch in dataloader:
-            stems, x_views, map_gt, imgs_gt = batch
-            x_views = x_views.to(device)
-            map_gt = map_gt.to(device)
-            imgs_gt = imgs_gt.to(device)
-            
-            # 前向传播
-            map_logits, imgs_logits = model(x_views)
-            
-            # 计算损失
-            from loss import compute_loss
-            loss, loss_info = compute_loss(
-                map_logits, map_gt,
-                imgs_logits, imgs_gt
-            )
-            
-            total_loss += loss.item()
-            count += 1
-    
-    avg_loss = total_loss / count
-    print(f"平均损失值: {avg_loss:.4f}")
-    return avg_loss
-
-
-def test_inference_speed(model, device, batch_size=1):
-    """测试模型推理速度"""
-    model.eval()
-    
-    # 创建虚拟输入
-    B = batch_size
-    V = 3
-    C = 3
-    H = 720
-    W = 1280
-    
-    dummy_input = torch.randn(B, V, C, H, W).to(device)
-    
-    # 预热
-    for _ in range(10):
-        with torch.no_grad():
-            _ = model(dummy_input)
-    
-    # 测试
-    import time
-    start_time = time.time()
-    num_runs = 100
-    
-    with torch.no_grad():
-        for _ in range(num_runs):
-            _ = model(dummy_input)
-    
-    end_time = time.time()
-    
-    avg_time = (end_time - start_time) / num_runs
-    fps = 1 / avg_time * batch_size
-    
-    print(f"平均推理时间: {avg_time*1000:.2f} ms")
-    print(f"推理速度: {fps:.2f} FPS")
-    
-    return avg_time, fps
-
-
-def count_parameters(model):
-    """统计模型参数量"""
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"总参数量: {total_params / 1e6:.2f}M")
-    print(f"可训练参数量: {trainable_params / 1e6:.2f}M")
-    return total_params, trainable_params
-
-
-def main():
-    """主函数"""
-    args = parse_args()
-    
-    # 设置设备
-    dev = torch.device(args.device)
-    print(f"[DEV] device={dev}, cuda_available={torch.cuda.is_available()}")
-    if dev.type == "cuda":
-        print(f"[DEV] gpu={torch.cuda.get_device_name(0)}")
-        torch.backends.cudnn.benchmark = True
-    
-    # 检查模型文件是否存在
-    model_path = Path(args.model_path)
-    if not model_path.exists():
-        print(f"错误: 模型文件 {model_path} 不存在")
-        return
-    
-    # ========== 1. 加载和处理标定 ==========
-    print("\n[CALIB] Loading calibration...")
-    
-    # 解析 rectangles.pom
-    data_root = Path(args.data_root)
+def _build_projection(
+    data_root: Path,
+    views: list[int],
+    feat_hw: Tuple[int, int],
+    bev_down: int,
+    drop_bad_views: bool,
+    valid_thr: float,
+) -> Tuple[Dict[int, Dict], torch.Tensor, list[int], float, Tuple[int, int], Dict[str, float]]:
     pom = parse_rectangles_pom(data_root / "rectangles.pom")
-    
-    # 解析视角
-    views = [int(x.strip()) for x in args.views.split(",") if x.strip().isdigit()]
-    assert len(views) > 0, "至少需要一个视角"
-    print(f"[CALIB] views={views}")
-    
-    # 加载标定数据
+
     calib_loader = CalibrationLoader(data_root / "calibrations", CAM_NAMES)
     calib_cache, t_norms = calib_loader.load_all(views)
-    
-    # 推断单位制
+
     step_m = float(pom.get("STEP", 0.025))
     unit_scale = decide_unit_scale(step_m, t_norms)
-    print(f"[UNIT] step={step_m}, median||t||={torch.median(torch.tensor(t_norms)):.2f} => unit_scale={unit_scale}")
-    
-    # ========== 2. 构建投影矩阵 ==========
-    print("\n[GRID] Building projection matrices...")
-    
-    Hb = int(pom.get("NB_HEIGHT", 1440)) // args.bev_down
-    Wb = int(pom.get("NB_WIDTH", 480)) // args.bev_down
-    Hf, Wf = args.feat_h, args.feat_w
-    
-    print(f"[CFG] img={args.img_h}x{args.img_w}, "
-          f"feat={Hf}x{Wf}, bev(reduced)={Hb}x{Wb}")
-    
-    # 缩放内参
+    print(f"[UNIT] step={step_m}, median||t||={np.median(t_norms):.2f} => unit_scale={unit_scale}")
+
+    Hb = int(pom.get("NB_HEIGHT", 1440)) // bev_down
+    Wb = int(pom.get("NB_WIDTH", 480)) // bev_down
+    Hf, Wf = feat_hw
+
     sx_f = Wf / IMG_ORI_W
     sy_f = Hf / IMG_ORI_H
-    
-    from calibration import scale_intrinsics
     for v in views:
-        K0 = calib_cache[v]["K0"]
-        K_feat = scale_intrinsics(K0, sx=sx_f, sy=sy_f)
-        calib_cache[v]["K_feat"] = K_feat
-    
-    # 构建投影矩阵
+        calib_cache[v]["K_feat"] = scale_intrinsics(calib_cache[v]["K0"], sx=sx_f, sy=sy_f)
+
     origin_x_m = float(pom.get("ORIGINE_X", -3.0))
     origin_y_m = float(pom.get("ORIGINE_Y", -9.0))
-    step = (step_m * args.bev_down) * unit_scale
+    step = (step_m * bev_down) * unit_scale
     ox = origin_x_m * unit_scale
     oy = origin_y_m * unit_scale
-    
     w2w_mat = make_worldgrid2worldcoord_mat(ox, oy, step)
-    
+
     proj_mats = []
     kept_views = []
     for v in views:
         K_feat = calib_cache[v]["K_feat"]
         R = calib_cache[v]["R"]
         t = calib_cache[v]["t"]
-        
+
         try:
             proj = build_mvdet_proj_mat(K_feat, R, t, w2w_mat)
-        except Exception as e:
-            print(f"[GRID] view={v} cam={calib_cache[v]['cam']} 错误: {e}")
-            if args.drop_bad_views:
+        except np.linalg.LinAlgError:
+            print(f"[GRID] view={v} cam={calib_cache[v]['cam']} singular")
+            if drop_bad_views:
                 continue
-            else:
-                raise RuntimeError("投影矩阵构建失败")
-        
+            raise RuntimeError("投影矩阵奇异")
+
         vr = compute_valid_ratio_from_homography(proj, (Hf, Wf), (Hb, Wb))
         print(f"[GRID] view={v} cam={calib_cache[v]['cam']} valid_ratio={vr:.4f}")
-        
-        if args.drop_bad_views and vr < args.valid_thr:
+        if drop_bad_views and vr < valid_thr:
             print(f"[GRID] drop view={v}")
             continue
-        
+
         proj_mats.append(torch.from_numpy(proj).float())
         kept_views.append(v)
-    
-    assert len(kept_views) > 0, "没有有效的视角"
+
+    if not kept_views:
+        raise RuntimeError("没有有效视角可用于评估")
+
+    return calib_cache, torch.stack(proj_mats, dim=0), kept_views, unit_scale, (Hb, Wb), pom
+
+
+def evaluate_model(
+    model: torch.nn.Module,
+    dataloader: DataLoader,
+    device: torch.device,
+    map_kernel: torch.Tensor,
+    img_kernel: torch.Tensor,
+    alpha: float,
+    log_every: int = 20,
+) -> Dict[str, float]:
+    criterion = GaussianMSE()
+    losses, bev_losses, img_losses = [], [], []
+    pos_mses, aux_pos_mses = [], []
+
+    model.eval()
+    with torch.no_grad():
+        for batch_idx, (_, x_views, map_gt, imgs_gt) in enumerate(dataloader):
+            x_views = x_views.to(device, non_blocking=True)
+            map_gt = map_gt.to(device, non_blocking=True)
+            imgs_gt = imgs_gt.to(device, non_blocking=True)
+
+            map_logits, imgs_logits = model(x_views)
+            map_res = torch.sigmoid(map_logits)
+            imgs_res = torch.sigmoid(imgs_logits)
+
+            bev_loss = criterion(map_res, map_gt, map_kernel)
+            per_view_loss = 0.0
+            for vi in range(imgs_res.shape[1]):
+                per_view_loss = per_view_loss + criterion(imgs_res[:, vi], imgs_gt[:, vi], img_kernel)
+            per_view_loss = per_view_loss / float(imgs_res.shape[1])
+            loss = bev_loss + alpha * per_view_loss
+
+            losses.append(loss.item())
+            bev_losses.append(bev_loss.item())
+            img_losses.append(per_view_loss.item())
+
+            pooled_gt = F.adaptive_max_pool2d(map_gt, output_size=map_res.shape[-2:])
+            pos_mask = pooled_gt > 0.1
+            pos_mse = ((map_res - pooled_gt) ** 2)[pos_mask].mean().item() if pos_mask.any() else float("nan")
+            pos_mses.append(pos_mse)
+
+            aux_pos_mask = imgs_gt > 0.1
+            aux_pos_mse = ((imgs_res - imgs_gt) ** 2)[aux_pos_mask].mean().item() if aux_pos_mask.any() else float(
+                "nan"
+            )
+            aux_pos_mses.append(aux_pos_mse)
+
+            if batch_idx % log_every == 0:
+                print(
+                    f"[eval step {batch_idx}] "
+                    f"loss={loss.item():.6f} "
+                    f"bev={bev_loss.item():.6f} "
+                    f"img={per_view_loss.item():.6f} "
+                    f"pos_mse={pos_mse:.6f} "
+                    f"aux_pos_mse={aux_pos_mse:.6f}"
+                )
+
+    return {
+        "loss": float(np.mean(losses)) if losses else float("nan"),
+        "bev_loss": float(np.mean(bev_losses)) if bev_losses else float("nan"),
+        "img_loss": float(np.mean(img_losses)) if img_losses else float("nan"),
+        "pos_mse": float(np.nanmean(pos_mses)) if pos_mses else float("nan"),
+        "aux_pos_mse": float(np.nanmean(aux_pos_mses)) if aux_pos_mses else float("nan"),
+    }
+
+
+def _load_model_weights(model: torch.nn.Module, model_path: Path, device: torch.device) -> None:
+    payload = torch.load(model_path, map_location=device)
+    if isinstance(payload, dict) and "model_state_dict" in payload:
+        state_dict = payload["model_state_dict"]
+    else:
+        state_dict = payload
+    model.load_state_dict(state_dict, strict=True)
+
+
+def main() -> Dict[str, float]:
+    args = parse_args()
+    dev = torch.device(args.device)
+    print(f"[DEV] device={dev}, cuda_available={torch.cuda.is_available()}")
+    if dev.type == "cuda":
+        print(f"[DEV] gpu={torch.cuda.get_device_name(0)}")
+        torch.backends.cudnn.benchmark = True
+
+    data_root = Path(args.data_root)
+    model_path = Path(args.model_path)
+    if not model_path.exists():
+        raise FileNotFoundError(f"模型文件不存在: {model_path}")
+
+    views = [int(x.strip()) for x in args.views.split(",") if x.strip().isdigit()]
+    if not views:
+        raise ValueError("至少需要一个视角")
+    print(f"[CFG] views={views}")
+
+    feat_hw = (args.feat_h, args.feat_w)
+    calib_cache, proj_mats, kept_views, unit_scale, reduced_hw, _ = _build_projection(
+        data_root=data_root,
+        views=views,
+        feat_hw=feat_hw,
+        bev_down=args.bev_down,
+        drop_bad_views=args.drop_bad_views,
+        valid_thr=args.valid_thr,
+    )
+
+    print(f"[CFG] img={args.img_h}x{args.img_w}, feat={args.feat_h}x{args.feat_w}, bev={reduced_hw}")
     print(f"[CFG] kept_views={kept_views}")
-    
-    proj_mats_t = torch.stack(proj_mats, dim=0).to(dev)
-    
-    # ========== 3. 创建数据集 ==========
-    print("\n[DATA] Creating dataset...")
-    
+
     ds = create_wildtrack_dataset(
         data_root=data_root,
         views=kept_views,
         max_frames=args.max_frames,
         img_hw=(args.img_h, args.img_w),
-        feat_hw=(Hf, Wf),
+        feat_hw=feat_hw,
         bev_down=args.bev_down,
         person_h_m=args.person_h,
         unit_scale=unit_scale,
         calib_cache=calib_cache,
     )
-    
+
     def collate_fn(batch):
         stems, x_views, map_gt, imgs_gt = zip(*batch)
         return list(stems), torch.stack(x_views, 0), torch.stack(map_gt, 0), torch.stack(imgs_gt, 0)
-    
+
     loader = DataLoader(
         ds,
         batch_size=args.batch,
-        shuffle=True,
-        num_workers=0,
+        shuffle=False,
+        num_workers=args.num_workers,
         pin_memory=(dev.type == "cuda"),
-        drop_last=True,
+        drop_last=False,
         collate_fn=collate_fn,
     )
-    
     print(f"[DATA] len(ds)={len(ds)}, len(loader)={len(loader)}")
-    
-    # ========== 4. 创建模型 ==========
-    print("\n[MODEL] Creating model...")
-    
+
     model = create_model(
         num_views=len(kept_views),
-        proj_mats=proj_mats_t,
-        reduced_hw=(Hb, Wb),
-        feat_hw=(Hf, Wf),
+        proj_mats=proj_mats.to(dev),
+        reduced_hw=reduced_hw,
+        feat_hw=feat_hw,
         device=dev,
         pretrained=False,
-        feat_ch=512,
+        feat_ch=DEFAULT_FEAT_CH,
         add_coord=True,
     )
-    
-    print(f"[MODEL] {type(model).__name__}")
-    
-    # 加载模型权重
-    print(f"[MODEL] Loading weights from {model_path}...")
-    state_dict = torch.load(model_path, map_location=dev)
-    model.load_state_dict(state_dict)
-    print("[OK] 模型权重加载成功")
-    
-    # ========== 5. 模型评估 ==========
-    print("\n[EVAL] Starting evaluation...")
-    
-    # 计算损失
-    avg_loss = evaluate_model(model, loader, dev)
-    
-    # 测试推理速度
-    avg_time, fps = test_inference_speed(model, dev)
-    
-    # 统计模型参数量
-    total_params, trainable_params = count_parameters(model)
-    
-    # 计算模型大小
-    torch.save(model.state_dict(), "temp_model.pth")
-    model_size = Path("temp_model.pth").stat().st_size / (1024*1024)  # MB
-    print(f"模型大小: {model_size:.2f} MB")
-    Path("temp_model.pth").unlink()
-    
-    print("\n" + "="*50)
-    print("评估结果总结")
-    print("="*50)
-    print(f"平均损失值: {avg_loss:.4f}")
-    print(f"推理速度: {fps:.2f} FPS")
-    print(f"平均推理时间: {avg_time*1000:.2f} ms")
-    print(f"模型大小: {model_size:.2f} MB")
-    print(f"总参数量: {total_params / 1e6:.2f}M")
-    print(f"可训练参数量: {trainable_params / 1e6:.2f}M")
-    print("="*50)
-    
+    _load_model_weights(model, model_path, dev)
+    print(f"[MODEL] loaded weights from {model_path}")
+
+    map_kernel = build_gaussian_kernel_2d(args.map_ksize, args.map_sigma, device=dev)
+    img_kernel = build_gaussian_kernel_2d(args.img_ksize, args.img_sigma, device=dev)
+
+    metrics = evaluate_model(
+        model=model,
+        dataloader=loader,
+        device=dev,
+        map_kernel=map_kernel,
+        img_kernel=img_kernel,
+        alpha=args.alpha,
+        log_every=args.log_every,
+    )
+
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    model_size_mb = model_path.stat().st_size / (1024 * 1024)
+
+    print("\n" + "=" * 56)
+    print("评估结果")
+    print("=" * 56)
+    print(f"loss:          {metrics['loss']:.6f}")
+    print(f"bev_loss:      {metrics['bev_loss']:.6f}")
+    print(f"img_loss:      {metrics['img_loss']:.6f}")
+    print(f"pos_mse:       {metrics['pos_mse']:.6f}")
+    print(f"aux_pos_mse:   {metrics['aux_pos_mse']:.6f}")
+    print(f"model_size_mb: {model_size_mb:.2f}")
+    print(f"total_params:  {total_params}")
+    print(f"trainable:     {trainable_params}")
+    print("=" * 56)
+
     return {
-        "avg_loss": avg_loss,
-        "fps": fps,
-        "avg_time": avg_time,
-        "model_size": model_size,
-        "total_params": total_params,
-        "trainable_params": trainable_params
+        **metrics,
+        "model_size_mb": model_size_mb,
+        "total_params": float(total_params),
+        "trainable_params": float(trainable_params),
     }
 
 

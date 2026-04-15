@@ -1,4 +1,4 @@
-"""Colab训练自动化主脚本"""
+﻿"""Colab训练自动化主脚本"""
 
 import logging
 import sys
