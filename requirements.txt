@@ -13,3 +13,7 @@ matplotlib>=3.7
 
 # Optional (logging)
 tensorboard>=2.14
+
+# Colab Automation
+playwright>=1.42
+python-dotenv>=1.0

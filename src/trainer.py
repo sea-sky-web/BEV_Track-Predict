@@ -1,10 +1,10 @@
-# scripts/trainer.py
+# src/trainer.py
 """
 训练器模块：训练循环、验证、日志记录和检查点管理
 """
 
 from pathlib import Path
-from typing import Tuple, Dict, Any, Optional
+from typing import Dict
 
 import numpy as np
 import torch
@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from loss import GaussianMSE
-from utils import save_heat_png, build_gaussian_kernel_2d
+from utils import save_heat_png
 
 
 class MVDetTrainer:
@@ -75,9 +75,10 @@ class MVDetTrainer:
             enabled=(amp_enabled and device.type == "cuda")
         )
         self.amp_enabled = amp_enabled and device.type == "cuda"
+        self.freeze_bn = freeze_bn
         
         # 冻结 BatchNorm
-        if freeze_bn:
+        if self.freeze_bn:
             self._freeze_bn()
         
         # 全局步数计数
@@ -118,6 +119,9 @@ class MVDetTrainer:
                 - "aux_pos_mse": 辅助正样本 MSE
         """
         self.model.train()
+        # model.train() 会把 BN 重新切回训练态，这里再次冻结确保语义稳定
+        if self.freeze_bn:
+            self._freeze_bn()
         
         losses = []
         bev_losses = []

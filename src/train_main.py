@@ -1,10 +1,9 @@
-# scripts/train_main.py
+# src/train_main.py
 """
 主训练脚本：参数解析、组件初始化、训练循环调用
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -19,12 +18,12 @@ from config import (
     DEFAULT_ALPHA, DEFAULT_MAP_KSIZE, DEFAULT_MAP_SIGMA,
     DEFAULT_IMG_KSIZE, DEFAULT_IMG_SIGMA, DEFAULT_PRETRAINED,
     DEFAULT_FREEZE_BN, DEFAULT_AMP_ENABLED, DEFAULT_DEVICE,
-    DEFAULT_MAX_LR, DEFAULT_NUM_WORKERS, DEFAULT_LOG_EVERY,
-    DEFAULT_SAVE_STEPS, DEFAULT_FIXED_STEM, DEFAULT_VALID_THR,
+    DEFAULT_MAX_LR, DEFAULT_LR_INIT, DEFAULT_MOMENTUM, DEFAULT_WEIGHT_DECAY,
+    DEFAULT_NUM_WORKERS, DEFAULT_LOG_EVERY, DEFAULT_VALID_THR, DEFAULT_FEAT_CH,
     CAM_NAMES,
     IMG_ORI_W, IMG_ORI_H,
 )
-from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_pom
+from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_pom, scale_intrinsics
 from geometry import make_worldgrid2worldcoord_mat, build_mvdet_proj_mat, compute_valid_ratio_from_homography
 from dataset import create_wildtrack_dataset
 from models import create_model
@@ -94,16 +93,18 @@ def parse_args():
                     help="计算设备")
     ap.add_argument("--max_lr", type=float, default=DEFAULT_MAX_LR,
                     help="最大学习率")
+    ap.add_argument("--lr_init", type=float, default=DEFAULT_LR_INIT,
+                    help="优化器初始学习率")
+    ap.add_argument("--momentum", type=float, default=DEFAULT_MOMENTUM,
+                    help="SGD 动量")
+    ap.add_argument("--weight_decay", type=float, default=DEFAULT_WEIGHT_DECAY,
+                    help="权重衰减")
     ap.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS,
                     help="数据加载线程数")
     
     # 日志和检查点
     ap.add_argument("--log_every", type=int, default=DEFAULT_LOG_EVERY,
                     help="每多少步打印日志")
-    ap.add_argument("--save_steps", type=str, default=DEFAULT_SAVE_STEPS,
-                    help="保存可视化的步数列表")
-    ap.add_argument("--fixed_stem", type=str, default=DEFAULT_FIXED_STEM,
-                    help="固定可视化的样本名称")
     
     return ap.parse_args()
 
@@ -160,7 +161,6 @@ def main():
     
     for v in views:
         K0 = calib_cache[v]["K0"]
-        from calibration import scale_intrinsics
         K_feat = scale_intrinsics(K0, sx=sx_f, sy=sy_f)
         calib_cache[v]["K_feat"] = K_feat
     
@@ -245,7 +245,7 @@ def main():
         feat_hw=(Hf, Wf),
         device=dev,
         pretrained=args.pretrained,
-        feat_ch=512,
+        feat_ch=DEFAULT_FEAT_CH,
         add_coord=True,
     )
     
@@ -254,7 +254,12 @@ def main():
     # ========== 5. 创建优化器和调度器 ==========
     print("\n[OPT] Creating optimizer and scheduler...")
     
-    optimizer = create_optimizer(model, lr=1e-3, momentum=0.5, weight_decay=5e-4)
+    optimizer = create_optimizer(
+        model,
+        lr=args.lr_init,
+        momentum=args.momentum,
+        weight_decay=args.weight_decay,
+    )
     scheduler = create_scheduler(
         optimizer,
         max_lr=args.max_lr,
@@ -278,8 +283,6 @@ def main():
     # 构建高斯核
     map_kernel = build_gaussian_kernel_2d(args.map_ksize, args.map_sigma, device=dev)
     img_kernel = build_gaussian_kernel_2d(args.img_ksize, args.img_sigma, device=dev)
-    
-    save_steps = set(int(s.strip()) for s in args.save_steps.split(",") if s.strip().isdigit())
     
     # ========== 7. 训练循环 ==========
     print("\n[TRAIN] Starting training...\n")
