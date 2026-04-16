@@ -49,6 +49,7 @@ class WildtrackMVDetDataset(Dataset):
         data_root: Path,
         views: List[int],
         max_frames: int,
+        frame_start: int,
         img_hw: Tuple[int, int],
         feat_hw: Tuple[int, int],
         bev_down: int,
@@ -91,9 +92,18 @@ class WildtrackMVDetDataset(Dataset):
             self.img_dirs.append(p)
         
         # 收集所有注释文件
-        self.ann_files = sorted(self.ann_dir.glob("*.json"))
+        all_ann_files = sorted(self.ann_dir.glob("*.json"))
+        if frame_start < 0:
+            raise ValueError(f"frame_start must be >= 0, got {frame_start}")
+        if frame_start >= len(all_ann_files):
+            raise ValueError(
+                f"frame_start={frame_start} is out of range for {len(all_ann_files)} annotation files"
+            )
+
         if max_frames > 0:
-            self.ann_files = self.ann_files[:max_frames]
+            self.ann_files = all_ann_files[frame_start: frame_start + max_frames]
+        else:
+            self.ann_files = all_ann_files[frame_start:]
         assert len(self.ann_files) > 0, "没有找到注释文件"
         
         # ImageNet 标准化参数
@@ -242,6 +252,7 @@ def create_wildtrack_dataset(
     person_h_m: float,
     unit_scale: float,
     calib_cache: Dict[int, Dict[str, Any]],
+    frame_start: int = 0,
 ) -> WildtrackMVDetDataset:
     """
     工厂函数：创建 Wildtrack 数据集
@@ -264,6 +275,7 @@ def create_wildtrack_dataset(
         data_root=data_root,
         views=views,
         max_frames=max_frames,
+        frame_start=frame_start,
         img_hw=img_hw,
         feat_hw=feat_hw,
         bev_down=bev_down,

@@ -32,7 +32,7 @@ src/
 - `loss.py`：`GaussianMSE`（主损失）及可选扩展版本。
 - `trainer.py`：训练循环、指标统计、checkpoint 管理。
 - `train_main.py`：训练配置编排与流程执行。
-- `evaluate_main.py`：离线评估，复用与训练一致的数据/投影链路。
+- `evaluate_main.py`：离线评估，复用与训练一致的数据/投影链路；支持检测级评估（阈值扫描、Precision/Recall/F1、定位误差）与 `frame_start` 帧切片。
 - `utils.py`：热图保存与高斯核构建等通用函数。
 
 ## 依赖方向
