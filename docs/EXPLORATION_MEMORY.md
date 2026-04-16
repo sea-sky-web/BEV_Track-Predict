@@ -2,6 +2,14 @@
 
 本文档用于沉淀项目在 Wildtrack 多视角 BEV 检测中的关键探索，避免历史结论在后续模型构建中丢失。
 
+## Documentation Discipline（2026-04-16 起执行）
+- 规则：任何代码改动（功能、参数、默认值、目录结构、训练/评估口径）必须在同次提交中更新对应文档。
+- 最低更新范围：
+  - 涉及训练/评估入口：同步更新 `README.md` 与 `src/README_MODULES.md`
+  - 涉及探索结论/实验判断：同步更新 `docs/EXPLORATION_MEMORY.md`
+  - 涉及归档迁移：同步更新 `archive/legacy/README.md`
+- 提交要求：若仅改代码未改文档，视为不完整修改，不提交。
+
 ## Phase 1: 标注与坐标闭环
 - 问题：`positionID` 与 BEV 网格/世界坐标映射是否正确。
 - 尝试：在 `02_draw_bboxes.py`、`03_geom_closure_validate.py` 中验证 `positionID -> (ix,iy) -> (x,y)`，并与投影结果比对。
@@ -36,6 +44,16 @@
 - 结论：自动化可提升重复执行效率，但易受页面结构变化影响，维护成本高。
 - 失败/风险：选择器失效、登录状态、运行时连接变化导致不稳定。
 - 当前替代：默认采用手动可控流程，仅保留自动化代码作知识资产。
+
+## Phase 6: 评估口径补全与可追溯评定（2026-04-16）
+- 问题：仅看 `loss/bev_loss/img_loss` 不能判断“是否真正检测到人”，且训练与评估容易使用同一帧段导致结论偏乐观。
+- 尝试：
+  - 在 `src/evaluate_main.py` 增加检测级评估：阈值扫描、Precision/Recall/F1、定位误差（米）。
+  - 增加 `frame_start`，支持按帧区间切分评估（例如前 300 训练、后 100 评估）。
+  - 增加 checkpoint 形状不匹配的可读错误信息（重点提示 train/eval 视角配置一致性）。
+- 结论：评估链路必须同时报告“损失指标 + 检测指标”，并且默认采用可配置帧切分做 holdout 评定。
+- 失败/风险：若 train/eval 的 `views/drop_bad_views/valid_thr` 不一致，会出现加载失败或指标不可比。
+- 当前继承：`src/evaluate_main.py`、`src/dataset.py`、`README.md`、`src/README_MODULES.md`。
 
 ## 关键排障手册（执行顺序）
 1. 先看 `valid_ratio` 与视角过滤是否异常。
