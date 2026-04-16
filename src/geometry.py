@@ -1,4 +1,4 @@
-# scripts/geometry.py
+# src/geometry.py
 """
 几何变换模块：坐标系变换、投影矩阵构建、透视变换等
 """
@@ -258,6 +258,7 @@ def warp_perspective_torch(
     Hd, Wd = dsize
     device = src.device
     dtype = src.dtype
+    calc_dtype = torch.float64
     
     # 确保 M 是 (B, 3, 3)
     if M_src2dst.dim() == 2:
@@ -265,8 +266,8 @@ def warp_perspective_torch(
     
     # 生成目标网格中的像素坐标
     ys, xs = torch.meshgrid(
-        torch.arange(Hd, device=device, dtype=dtype),
-        torch.arange(Wd, device=device, dtype=dtype),
+        torch.arange(Hd, device=device, dtype=calc_dtype),
+        torch.arange(Wd, device=device, dtype=calc_dtype),
         indexing="ij"
     )
     ones = torch.ones_like(xs)
@@ -276,20 +277,35 @@ def warp_perspective_torch(
     dst_h = dst_h.unsqueeze(0).expand(B, -1, -1)  # (B, 3, Hd*Wd)
     
     # 逆向投影：src_h = inv(M) @ dst_h
-    M_inv = torch.inverse(M_src2dst.to(dtype=dtype, device=device))  # (B, 3, 3)
+    M_inv = torch.linalg.inv(M_src2dst.to(dtype=calc_dtype, device=device))  # (B, 3, 3)
     src_h = M_inv @ dst_h  # (B, 3, Hd*Wd)
     
     # 从齐次坐标恢复笛卡尔坐标
-    x = src_h[:, 0] / src_h[:, 2].clamp_min(1e-6)
-    y = src_h[:, 1] / src_h[:, 2].clamp_min(1e-6)
+    z = src_h[:, 2]
+    z_safe = torch.where(z >= 0.0, z.clamp_min(1e-6), z.clamp_max(-1e-6))
+    valid = (
+        torch.isfinite(src_h[:, 0]) &
+        torch.isfinite(src_h[:, 1]) &
+        torch.isfinite(z) &
+        (z > 1e-6)
+    )
+    x = src_h[:, 0] / z_safe
+    y = src_h[:, 1] / z_safe
     
     # 归一化到 [-1, 1] 用于 grid_sample
     # grid_sample 期望在 [-1, 1] 范围内，其中 (-1, -1) 是左上角，(1, 1) 是右下角
-    x_norm = 2.0 * (x / (Ws - 1.0)) - 1.0
-    y_norm = 2.0 * (y / (Hs - 1.0)) - 1.0
+    ws_denom = float(max(Ws - 1, 1))
+    hs_denom = float(max(Hs - 1, 1))
+    x_norm = 2.0 * (x / ws_denom) - 1.0
+    y_norm = 2.0 * (y / hs_denom) - 1.0
+    x_norm = torch.nan_to_num(x_norm, nan=2.0, posinf=2.0, neginf=-2.0)
+    y_norm = torch.nan_to_num(y_norm, nan=2.0, posinf=2.0, neginf=-2.0)
+    invalid_fill = torch.full_like(x_norm, 2.0)
+    x_norm = torch.where(valid, x_norm, invalid_fill)
+    y_norm = torch.where(valid, y_norm, invalid_fill)
     
     # 构建采样网格：(B, Hd, Wd, 2)
-    grid = torch.stack([x_norm, y_norm], dim=-1).reshape(B, Hd, Wd, 2)
+    grid = torch.stack([x_norm, y_norm], dim=-1).reshape(B, Hd, Wd, 2).to(dtype=dtype)
     
     # 使用 grid_sample 进行双线性插值
     # padding_mode="zeros" 表示越界返回 0
@@ -300,8 +316,7 @@ def warp_perspective_torch(
         padding_mode="zeros",
         align_corners=True
     )
-    
-    return out
+    return torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def create_grid_sampler(
