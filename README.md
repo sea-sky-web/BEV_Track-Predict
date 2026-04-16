@@ -68,6 +68,12 @@ python src/train_main.py --data_root wildtrack --views 0,1,2 --device cuda
 python src/evaluate_main.py --data_root wildtrack --views 0,1,2 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda
 ```
 
+如需做“检测级”评估（阈值扫描 + Precision/Recall/F1 + 定位误差），可直接启用：
+
+```bash
+python src/evaluate_main.py --data_root wildtrack --views 1,2 --drop_bad_views --valid_thr 0.15 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda --frame_start 300 --max_frames 100 --report_detection --metrics_out outputs/eval_metrics.json
+```
+
 该脚本与 `src/train_main.py` 使用相同的投影与数据构建链路，输出 `loss/bev_loss/img_loss/pos_mse/aux_pos_mse` 以及模型参数统计。
 
 ## 历史探索归档

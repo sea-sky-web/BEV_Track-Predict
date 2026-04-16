@@ -1,10 +1,15 @@
 """
-评估脚本：使用与 train_main 一致的数据与投影链路，计算离线损失指标。
+Offline evaluation entrypoint for MVDet-like training chain.
+
+This script now supports:
+1) Loss-style metrics aligned with training loss.
+2) Detection-style metrics (precision/recall/F1) by threshold sweep.
 """
 
 import argparse
+import json
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -25,12 +30,12 @@ from config import (
     DEFAULT_IMG_KSIZE,
     DEFAULT_IMG_SIGMA,
     DEFAULT_IMG_W,
+    DEFAULT_MAP_KSIZE,
+    DEFAULT_MAP_SIGMA,
     DEFAULT_MAX_FRAMES,
     DEFAULT_NUM_WORKERS,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_PERSON_H,
-    DEFAULT_MAP_KSIZE,
-    DEFAULT_MAP_SIGMA,
     DEFAULT_VALID_THR,
     IMG_ORI_H,
     IMG_ORI_W,
@@ -43,65 +48,109 @@ from utils import build_gaussian_kernel_2d
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="MVDet 风格模型评估脚本（对齐 src 主链路）")
+    ap = argparse.ArgumentParser(
+        description="Evaluate MVDet-like model (loss metrics + optional detection metrics)."
+    )
 
-    ap.add_argument("--data_root", type=str, default=DEFAULT_DATA_ROOT, help="Wildtrack 数据集根目录")
-    ap.add_argument("--views", type=str, default="0,1,2", help="使用的视角 ID，例如 0,1,2")
-    ap.add_argument("--drop_bad_views", action="store_true", help="是否丢弃低有效性的视角")
-    ap.add_argument("--valid_thr", type=float, default=DEFAULT_VALID_THR, help="投影有效性阈值")
+    ap.add_argument("--data_root", type=str, default=DEFAULT_DATA_ROOT, help="Wildtrack dataset root")
+    ap.add_argument("--views", type=str, default="0,1,2", help="View IDs, e.g. 0,1,2")
+    ap.add_argument("--drop_bad_views", action="store_true", help="Drop views with low valid projection ratio")
+    ap.add_argument("--valid_thr", type=float, default=DEFAULT_VALID_THR, help="Projection valid ratio threshold")
 
     ap.add_argument(
         "--model_path",
         type=str,
         default=str(Path(DEFAULT_OUTPUT_DIR) / "model_final.pth"),
-        help="模型权重路径（支持纯 state_dict 或 checkpoint）",
+        help="Path to model weights (.pth)",
     )
-    ap.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="计算设备")
+    ap.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="Device")
 
-    ap.add_argument("--max_frames", type=int, default=DEFAULT_MAX_FRAMES, help="评估使用的最大帧数")
-    ap.add_argument("--batch", type=int, default=DEFAULT_BATCH_SIZE, help="批大小")
-    ap.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS, help="数据加载线程数")
+    ap.add_argument("--frame_start", type=int, default=0, help="Start frame index (annotation list index)")
+    ap.add_argument("--max_frames", type=int, default=DEFAULT_MAX_FRAMES, help="Number of frames to evaluate")
+    ap.add_argument("--batch", type=int, default=DEFAULT_BATCH_SIZE, help="Batch size")
+    ap.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS, help="Dataloader workers")
 
-    ap.add_argument("--bev_down", type=int, default=DEFAULT_BEV_DOWN, help="BEV 下采样倍数")
-    ap.add_argument("--feat_h", type=int, default=DEFAULT_FEAT_H, help="特征平面高度")
-    ap.add_argument("--feat_w", type=int, default=DEFAULT_FEAT_W, help="特征平面宽度")
-    ap.add_argument("--img_h", type=int, default=DEFAULT_IMG_H, help="输入图像高度")
-    ap.add_argument("--img_w", type=int, default=DEFAULT_IMG_W, help="输入图像宽度")
-    ap.add_argument("--person_h", type=float, default=DEFAULT_PERSON_H, help="人体高度（米）")
+    ap.add_argument("--bev_down", type=int, default=DEFAULT_BEV_DOWN, help="BEV downsample factor")
+    ap.add_argument("--feat_h", type=int, default=DEFAULT_FEAT_H, help="Feature map height")
+    ap.add_argument("--feat_w", type=int, default=DEFAULT_FEAT_W, help="Feature map width")
+    ap.add_argument("--img_h", type=int, default=DEFAULT_IMG_H, help="Input image height")
+    ap.add_argument("--img_w", type=int, default=DEFAULT_IMG_W, help="Input image width")
+    ap.add_argument("--person_h", type=float, default=DEFAULT_PERSON_H, help="Person height (meters)")
 
-    ap.add_argument("--alpha", type=float, default=DEFAULT_ALPHA, help="图像辅助损失权重")
-    ap.add_argument("--map_ksize", type=int, default=DEFAULT_MAP_KSIZE, help="BEV 热图高斯核大小")
-    ap.add_argument("--map_sigma", type=float, default=DEFAULT_MAP_SIGMA, help="BEV 热图高斯标准差")
-    ap.add_argument("--img_ksize", type=int, default=DEFAULT_IMG_KSIZE, help="图像热图高斯核大小")
-    ap.add_argument("--img_sigma", type=float, default=DEFAULT_IMG_SIGMA, help="图像热图高斯标准差")
-    ap.add_argument("--log_every", type=int, default=20, help="每多少步打印一次评估日志")
+    ap.add_argument("--alpha", type=float, default=DEFAULT_ALPHA, help="Aux image loss weight")
+    ap.add_argument("--map_ksize", type=int, default=DEFAULT_MAP_KSIZE, help="Gaussian kernel size for BEV")
+    ap.add_argument("--map_sigma", type=float, default=DEFAULT_MAP_SIGMA, help="Gaussian sigma for BEV")
+    ap.add_argument("--img_ksize", type=int, default=DEFAULT_IMG_KSIZE, help="Gaussian kernel size for image")
+    ap.add_argument("--img_sigma", type=float, default=DEFAULT_IMG_SIGMA, help="Gaussian sigma for image")
+    ap.add_argument("--log_every", type=int, default=20, help="Log interval")
+
+    ap.add_argument("--report_detection", action="store_true", help="Report detection metrics")
+    ap.add_argument(
+        "--det_thresholds",
+        type=str,
+        default="0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50",
+        help="Comma-separated detection thresholds",
+    )
+    ap.add_argument("--det_dist_thr", type=float, default=3.0, help="Match distance threshold (BEV cells)")
+    ap.add_argument("--det_nms_ksize", type=int, default=3, help="NMS kernel size (odd int)")
+    ap.add_argument("--det_max_preds", type=int, default=200, help="Max predictions per frame after NMS")
+
+    ap.add_argument(
+        "--metrics_out",
+        type=str,
+        default="",
+        help="Optional path to save metrics json",
+    )
 
     return ap.parse_args()
 
 
+def parse_views(raw: str) -> List[int]:
+    views = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
+    if not views:
+        raise ValueError("At least one valid view id is required.")
+    return views
+
+
+def parse_thresholds(raw: str) -> List[float]:
+    vals: List[float] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        vals.append(float(token))
+    if not vals:
+        raise ValueError("det_thresholds cannot be empty.")
+    vals = sorted(set(vals))
+    for v in vals:
+        if v < 0.0 or v > 1.0:
+            raise ValueError(f"det_threshold out of range [0,1]: {v}")
+    return vals
+
+
 def _build_projection(
     data_root: Path,
-    views: list[int],
+    views: Sequence[int],
     feat_hw: Tuple[int, int],
     bev_down: int,
     drop_bad_views: bool,
     valid_thr: float,
-) -> Tuple[Dict[int, Dict], torch.Tensor, list[int], float, Tuple[int, int], Dict[str, float]]:
+) -> Tuple[Dict[int, Dict], torch.Tensor, List[int], float, Tuple[int, int], Dict, float]:
     pom = parse_rectangles_pom(data_root / "rectangles.pom")
 
     calib_loader = CalibrationLoader(data_root / "calibrations", CAM_NAMES)
-    calib_cache, t_norms = calib_loader.load_all(views)
+    calib_cache, t_norms = calib_loader.load_all(list(views))
 
     step_m = float(pom.get("STEP", 0.025))
     unit_scale = decide_unit_scale(step_m, t_norms)
     print(f"[UNIT] step={step_m}, median||t||={np.median(t_norms):.2f} => unit_scale={unit_scale}")
 
-    Hb = int(pom.get("NB_HEIGHT", 1440)) // bev_down
-    Wb = int(pom.get("NB_WIDTH", 480)) // bev_down
-    Hf, Wf = feat_hw
+    hb = int(pom.get("NB_HEIGHT", 1440)) // bev_down
+    wb = int(pom.get("NB_WIDTH", 480)) // bev_down
+    hf, wf = feat_hw
 
-    sx_f = Wf / IMG_ORI_W
-    sy_f = Hf / IMG_ORI_H
+    sx_f = wf / IMG_ORI_W
+    sy_f = hf / IMG_ORI_H
     for v in views:
         calib_cache[v]["K_feat"] = scale_intrinsics(calib_cache[v]["K0"], sx=sx_f, sy=sy_f)
 
@@ -112,22 +161,22 @@ def _build_projection(
     oy = origin_y_m * unit_scale
     w2w_mat = make_worldgrid2worldcoord_mat(ox, oy, step)
 
-    proj_mats = []
-    kept_views = []
+    proj_mats: List[torch.Tensor] = []
+    kept_views: List[int] = []
     for v in views:
-        K_feat = calib_cache[v]["K_feat"]
-        R = calib_cache[v]["R"]
+        k_feat = calib_cache[v]["K_feat"]
+        r = calib_cache[v]["R"]
         t = calib_cache[v]["t"]
 
         try:
-            proj = build_mvdet_proj_mat(K_feat, R, t, w2w_mat)
+            proj = build_mvdet_proj_mat(k_feat, r, t, w2w_mat)
         except np.linalg.LinAlgError:
             print(f"[GRID] view={v} cam={calib_cache[v]['cam']} singular")
             if drop_bad_views:
                 continue
-            raise RuntimeError("投影矩阵奇异")
+            raise RuntimeError("Projection matrix is singular.")
 
-        vr = compute_valid_ratio_from_homography(proj, (Hf, Wf), (Hb, Wb))
+        vr = compute_valid_ratio_from_homography(proj, (hf, wf), (hb, wb))
         print(f"[GRID] view={v} cam={calib_cache[v]['cam']} valid_ratio={vr:.4f}")
         if drop_bad_views and vr < valid_thr:
             print(f"[GRID] drop view={v}")
@@ -137,9 +186,9 @@ def _build_projection(
         kept_views.append(v)
 
     if not kept_views:
-        raise RuntimeError("没有有效视角可用于评估")
+        raise RuntimeError("No valid view remained after projection filtering.")
 
-    return calib_cache, torch.stack(proj_mats, dim=0), kept_views, unit_scale, (Hb, Wb), pom
+    return calib_cache, torch.stack(proj_mats, dim=0), kept_views, unit_scale, (hb, wb), pom, step_m
 
 
 def evaluate_model(
@@ -150,10 +199,17 @@ def evaluate_model(
     img_kernel: torch.Tensor,
     alpha: float,
     log_every: int = 20,
-) -> Dict[str, float]:
+    collect_detection_inputs: bool = False,
+) -> Tuple[Dict[str, float], List[torch.Tensor], List[torch.Tensor]]:
     criterion = GaussianMSE()
-    losses, bev_losses, img_losses = [], [], []
-    pos_mses, aux_pos_mses = [], []
+    losses: List[float] = []
+    bev_losses: List[float] = []
+    img_losses: List[float] = []
+    pos_mses: List[float] = []
+    aux_pos_mses: List[float] = []
+
+    pred_maps: List[torch.Tensor] = []
+    gt_maps: List[torch.Tensor] = []
 
     model.eval()
     with torch.no_grad():
@@ -188,6 +244,12 @@ def evaluate_model(
             )
             aux_pos_mses.append(aux_pos_mse)
 
+            if collect_detection_inputs:
+                gt_bin = (pooled_gt > 0.1).to(torch.uint8)
+                for bi in range(map_res.shape[0]):
+                    pred_maps.append(map_res[bi, 0].detach().cpu())
+                    gt_maps.append(gt_bin[bi, 0].detach().cpu())
+
             if batch_idx % log_every == 0:
                 print(
                     f"[eval step {batch_idx}] "
@@ -198,13 +260,145 @@ def evaluate_model(
                     f"aux_pos_mse={aux_pos_mse:.6f}"
                 )
 
-    return {
+    metrics = {
         "loss": float(np.mean(losses)) if losses else float("nan"),
         "bev_loss": float(np.mean(bev_losses)) if bev_losses else float("nan"),
         "img_loss": float(np.mean(img_losses)) if img_losses else float("nan"),
         "pos_mse": float(np.nanmean(pos_mses)) if pos_mses else float("nan"),
         "aux_pos_mse": float(np.nanmean(aux_pos_mses)) if aux_pos_mses else float("nan"),
     }
+    return metrics, pred_maps, gt_maps
+
+
+def _extract_points(
+    heatmap: torch.Tensor,
+    threshold: float,
+    nms_ksize: int,
+    max_preds: int,
+) -> np.ndarray:
+    if heatmap.ndim != 2:
+        raise ValueError(f"Expected 2D heatmap, got shape {tuple(heatmap.shape)}")
+    if nms_ksize <= 0 or nms_ksize % 2 == 0:
+        raise ValueError(f"det_nms_ksize must be a positive odd integer, got {nms_ksize}")
+
+    hm = heatmap.float()
+    pooled = F.max_pool2d(
+        hm.unsqueeze(0).unsqueeze(0),
+        kernel_size=nms_ksize,
+        stride=1,
+        padding=nms_ksize // 2,
+    )[0, 0]
+    keep = (hm >= threshold) & (hm >= pooled - 1e-12)
+    ys, xs = torch.nonzero(keep, as_tuple=True)
+    if ys.numel() == 0:
+        return np.empty((0, 3), dtype=np.float32)
+
+    scores = hm[ys, xs]
+    order = torch.argsort(scores, descending=True)
+    if max_preds > 0:
+        order = order[:max_preds]
+
+    ys = ys[order].float().cpu().numpy()
+    xs = xs[order].float().cpu().numpy()
+    scores = scores[order].float().cpu().numpy()
+    return np.stack([ys, xs, scores], axis=1).astype(np.float32)
+
+
+def _match_points(pred_yx: np.ndarray, gt_yx: np.ndarray, dist_thr: float) -> Tuple[int, int, int, float]:
+    if pred_yx.shape[0] == 0:
+        return 0, 0, int(gt_yx.shape[0]), 0.0
+    if gt_yx.shape[0] == 0:
+        return 0, int(pred_yx.shape[0]), 0, 0.0
+
+    used = np.zeros(gt_yx.shape[0], dtype=bool)
+    tp = 0
+    dist_sum = 0.0
+
+    for pi in range(pred_yx.shape[0]):
+        dists = np.sqrt(((gt_yx - pred_yx[pi]) ** 2).sum(axis=1))
+        dists[used] = np.inf
+        gi = int(np.argmin(dists))
+        if np.isfinite(dists[gi]) and float(dists[gi]) <= dist_thr:
+            used[gi] = True
+            tp += 1
+            dist_sum += float(dists[gi])
+
+    fp = int(pred_yx.shape[0] - tp)
+    fn = int(gt_yx.shape[0] - tp)
+    return tp, fp, fn, dist_sum
+
+
+def evaluate_detection(
+    pred_maps: Sequence[torch.Tensor],
+    gt_maps: Sequence[torch.Tensor],
+    thresholds: Sequence[float],
+    dist_thr: float,
+    nms_ksize: int,
+    max_preds: int,
+    bev_cell_m: float,
+) -> Tuple[List[Dict[str, float]], Dict[str, float]]:
+    rows: List[Dict[str, float]] = []
+    if len(pred_maps) != len(gt_maps):
+        raise ValueError("pred_maps and gt_maps must have the same length.")
+
+    for thr in thresholds:
+        tp = 0
+        fp = 0
+        fn = 0
+        dist_sum = 0.0
+
+        for pred_map, gt_map in zip(pred_maps, gt_maps):
+            pred_pts = _extract_points(pred_map, thr, nms_ksize=nms_ksize, max_preds=max_preds)
+            pred_yx = pred_pts[:, :2] if pred_pts.size else np.empty((0, 2), dtype=np.float32)
+
+            gt_yx = torch.nonzero(gt_map > 0, as_tuple=False).cpu().numpy().astype(np.float32)
+
+            c_tp, c_fp, c_fn, c_dist = _match_points(pred_yx=pred_yx, gt_yx=gt_yx, dist_thr=dist_thr)
+            tp += c_tp
+            fp += c_fp
+            fn += c_fn
+            dist_sum += c_dist
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        loc_err_px = dist_sum / tp if tp > 0 else float("nan")
+        loc_err_m = loc_err_px * bev_cell_m if np.isfinite(loc_err_px) else float("nan")
+
+        rows.append(
+            {
+                "threshold": float(thr),
+                "tp": float(tp),
+                "fp": float(fp),
+                "fn": float(fn),
+                "precision": float(precision),
+                "recall": float(recall),
+                "f1": float(f1),
+                "loc_err_px": float(loc_err_px),
+                "loc_err_m": float(loc_err_m),
+            }
+        )
+
+    best = max(rows, key=lambda r: (r["f1"], r["precision"], r["recall"]))
+    return rows, best
+
+
+def _print_detection_table(rows: Sequence[Dict[str, float]], best_threshold: float) -> None:
+    print("\n" + "=" * 56)
+    print("Detection Sweep (BEV)")
+    print("=" * 56)
+    print("thr      precision  recall     f1         loc_err(m)")
+    for row in rows:
+        mark = "*" if abs(row["threshold"] - best_threshold) < 1e-12 else " "
+        loc_m = "nan" if not np.isfinite(row["loc_err_m"]) else f"{row['loc_err_m']:.4f}"
+        print(
+            f"{mark}{row['threshold']:<8.2f} "
+            f"{row['precision']:<10.4f} "
+            f"{row['recall']:<10.4f} "
+            f"{row['f1']:<10.4f} "
+            f"{loc_m}"
+        )
+    print("=" * 56)
 
 
 def _load_model_weights(model: torch.nn.Module, model_path: Path, device: torch.device) -> None:
@@ -213,7 +407,18 @@ def _load_model_weights(model: torch.nn.Module, model_path: Path, device: torch.
         state_dict = payload["model_state_dict"]
     else:
         state_dict = payload
-    model.load_state_dict(state_dict, strict=True)
+    try:
+        model.load_state_dict(state_dict, strict=True)
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "size mismatch for proj_mats" in msg or "size mismatch for bev_head.net.0.weight" in msg:
+            raise RuntimeError(
+                "Checkpoint shape mismatch: training and evaluation model topology differ.\n"
+                "Most common cause: different kept views between train/eval.\n"
+                "Use exactly the same --views/--drop_bad_views/--valid_thr as training.\n"
+                f"Original error:\n{msg}"
+            ) from exc
+        raise
 
 
 def main() -> Dict[str, float]:
@@ -227,15 +432,13 @@ def main() -> Dict[str, float]:
     data_root = Path(args.data_root)
     model_path = Path(args.model_path)
     if not model_path.exists():
-        raise FileNotFoundError(f"模型文件不存在: {model_path}")
+        raise FileNotFoundError(f"Model file not found: {model_path}")
 
-    views = [int(x.strip()) for x in args.views.split(",") if x.strip().isdigit()]
-    if not views:
-        raise ValueError("至少需要一个视角")
+    views = parse_views(args.views)
     print(f"[CFG] views={views}")
 
     feat_hw = (args.feat_h, args.feat_w)
-    calib_cache, proj_mats, kept_views, unit_scale, reduced_hw, _ = _build_projection(
+    calib_cache, proj_mats, kept_views, unit_scale, reduced_hw, _, step_m = _build_projection(
         data_root=data_root,
         views=views,
         feat_hw=feat_hw,
@@ -251,6 +454,7 @@ def main() -> Dict[str, float]:
         data_root=data_root,
         views=kept_views,
         max_frames=args.max_frames,
+        frame_start=args.frame_start,
         img_hw=(args.img_h, args.img_w),
         feat_hw=feat_hw,
         bev_down=args.bev_down,
@@ -290,7 +494,7 @@ def main() -> Dict[str, float]:
     map_kernel = build_gaussian_kernel_2d(args.map_ksize, args.map_sigma, device=dev)
     img_kernel = build_gaussian_kernel_2d(args.img_ksize, args.img_sigma, device=dev)
 
-    metrics = evaluate_model(
+    base_metrics, pred_maps, gt_maps = evaluate_model(
         model=model,
         dataloader=loader,
         device=dev,
@@ -298,6 +502,7 @@ def main() -> Dict[str, float]:
         img_kernel=img_kernel,
         alpha=args.alpha,
         log_every=args.log_every,
+        collect_detection_inputs=args.report_detection,
     )
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -305,24 +510,68 @@ def main() -> Dict[str, float]:
     model_size_mb = model_path.stat().st_size / (1024 * 1024)
 
     print("\n" + "=" * 56)
-    print("评估结果")
+    print("Evaluation Summary")
     print("=" * 56)
-    print(f"loss:          {metrics['loss']:.6f}")
-    print(f"bev_loss:      {metrics['bev_loss']:.6f}")
-    print(f"img_loss:      {metrics['img_loss']:.6f}")
-    print(f"pos_mse:       {metrics['pos_mse']:.6f}")
-    print(f"aux_pos_mse:   {metrics['aux_pos_mse']:.6f}")
+    print(f"loss:          {base_metrics['loss']:.6f}")
+    print(f"bev_loss:      {base_metrics['bev_loss']:.6f}")
+    print(f"img_loss:      {base_metrics['img_loss']:.6f}")
+    print(f"pos_mse:       {base_metrics['pos_mse']:.6f}")
+    print(f"aux_pos_mse:   {base_metrics['aux_pos_mse']:.6f}")
     print(f"model_size_mb: {model_size_mb:.2f}")
     print(f"total_params:  {total_params}")
     print(f"trainable:     {trainable_params}")
     print("=" * 56)
 
-    return {
-        **metrics,
+    final_metrics: Dict[str, float] = {
+        **base_metrics,
         "model_size_mb": model_size_mb,
         "total_params": float(total_params),
         "trainable_params": float(trainable_params),
     }
+    output_payload: Dict[str, object] = dict(final_metrics)
+
+    if args.report_detection:
+        thresholds = parse_thresholds(args.det_thresholds)
+        bev_cell_m = step_m * args.bev_down
+        rows, best = evaluate_detection(
+            pred_maps=pred_maps,
+            gt_maps=gt_maps,
+            thresholds=thresholds,
+            dist_thr=args.det_dist_thr,
+            nms_ksize=args.det_nms_ksize,
+            max_preds=args.det_max_preds,
+            bev_cell_m=bev_cell_m,
+        )
+        _print_detection_table(rows, best_threshold=best["threshold"])
+
+        print(
+            "[BEST] "
+            f"thr={best['threshold']:.2f}, "
+            f"precision={best['precision']:.4f}, "
+            f"recall={best['recall']:.4f}, "
+            f"f1={best['f1']:.4f}, "
+            f"loc_err_m={best['loc_err_m']:.4f}"
+        )
+
+        final_metrics.update(
+            {
+                "det_best_threshold": float(best["threshold"]),
+                "det_precision": float(best["precision"]),
+                "det_recall": float(best["recall"]),
+                "det_f1": float(best["f1"]),
+                "det_loc_err_m": float(best["loc_err_m"]),
+            }
+        )
+        output_payload["det_sweep"] = rows
+        output_payload["det_best"] = best
+
+    if args.metrics_out:
+        out_path = Path(args.metrics_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(output_payload, indent=2), encoding="utf-8")
+        print(f"[SAVE] metrics saved to {out_path}")
+
+    return final_metrics
 
 
 if __name__ == "__main__":
