@@ -55,6 +55,25 @@
 - 失败/风险：若 train/eval 的 `views/drop_bad_views/valid_thr` 不一致，会出现加载失败或指标不可比。
 - 当前继承：`src/evaluate_main.py`、`src/dataset.py`、`README.md`、`src/README_MODULES.md`。
 
+## Session Handoff（2026-04-17，精简交接）
+- 目标边界：
+  - 训练仅在 Colab 执行，不在本地跑训练/推理。
+  - 本地仅做代码修改、静态检查、提交与推送。
+- 本轮已落地（已推送 `codex/github-triage-prep`）：
+  - `70bf5f7`：评估增强（检测指标阈值扫描 + `frame_start` 帧切片 + 评估 JSON 输出）。
+  - `daf7565`：文档纪律落地（代码改动必须同次提交更新文档）。
+- 当前训练现状（基于用户给出的 Colab 日志）：
+  - 训练稳定，无 NaN，`bev/img loss` 收敛。
+  - 但 `pos_mse` 高、`aux_pos_mse` 长期接近 1，存在“背景偏置”风险，不能仅凭 loss 判定达标。
+- 当前结论：
+  - 必须做检测级评定（Precision/Recall/F1 + 定位误差）后再决定是否继续改模型。
+- 下一步唯一优先动作：
+  - 在 Colab 跑 `src/evaluate_main.py --report_detection`，并使用 holdout 帧段（建议 `--frame_start 300 --max_frames 100`）。
+  - 训练与评估必须保持同视角配置（例如训练 `kept_views=[1,2]`，评估也用 `--views 1,2` 或同样的 drop 策略）。
+- 交接时重点回传：
+  - `[BEST] thr/precision/recall/f1/loc_err_m`
+  - `det_sweep` 全表或 `outputs/eval_holdout_metrics.json`
+
 ## 关键排障手册（执行顺序）
 1. 先看 `valid_ratio` 与视角过滤是否异常。
 2. 再查 aux GT 是否非空（head/foot 热图是否有峰）。
