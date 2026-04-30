@@ -1,0 +1,22 @@
+exp_name: colab_baseline
+
+data:
+  data_root: ./data/Wildtrack
+
+output:
+  runs_root: ./runs
+
+train:
+  # run_colab_exp.py 会将该命令拼接为: python + train_script + args
+  train_script: scripts/train_main.py
+  args:
+    - --data_root
+    - ./data/Wildtrack
+    - --epochs
+    - "10"
+    - --batch
+    - "2"
+
+target_metric:
+  name: MODA
+  value: 0.0
