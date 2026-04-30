@@ -1,22 +1,26 @@
-exp_name: colab_baseline
+exp_name: "wildtrack_baseline"
 
-data:
-  data_root: ./data/Wildtrack
+data_root: "/content/BEV_Track-Predict/wildtrack"
 
-output:
-  runs_root: ./runs
+output_dir: "/content/BEV_Track-Predict/runs/wildtrack_baseline"
 
-train:
-  # run_colab_exp.py 会将该命令拼接为: python + train_script + args
-  train_script: scripts/train_main.py
-  args:
-    - --data_root
-    - ./data/Wildtrack
-    - --epochs
-    - "10"
-    - --batch
-    - "2"
+train_command:
+  - "python"
+  - "scripts/train_main.py"
+  - "--data_root"
+  - "/content/BEV_Track-Predict/wildtrack"
+  - "--epochs"
+  - "10"
+  - "--batch"
+  - "2"
 
-target_metric:
-  name: MODA
-  value: 0.0
+target_metric: "moda"
+target_value: 0.75
+
+log_tail_lines: 500
+
+git:
+  branch: "main"
+  result_dir: "ai_runs"
+  latest_dir: "ai_runs/latest"
+  history_dir: "ai_runs/history"
