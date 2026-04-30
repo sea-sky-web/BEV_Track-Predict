@@ -1,0 +1,26 @@
+exp_name: "wildtrack_baseline"
+
+data_root: "/content/BEV_Track-Predict/wildtrack"
+output_dir: "/content/BEV_Track-Predict/runs/wildtrack_baseline"
+
+train_command:
+  - "python"
+  - "scripts/train_main.py"
+  - "--data_root"
+  - "/content/BEV_Track-Predict/wildtrack"
+  - "--views"
+  - "0"
+  - "--drop_bad_views"
+  - "--valid_thr"
+  - "0.10"
+
+target_metric: "moda"
+target_value: 0.75
+
+log_tail_lines: 500
+
+git:
+  branch: "main"
+  result_dir: "ai_runs"
+  latest_dir: "ai_runs/latest"
+  history_dir: "ai_runs/history"

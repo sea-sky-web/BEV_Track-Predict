@@ -1,7 +1,8 @@
 # Python artifacts
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
+*.py[cod]
 
 # Virtual envs
 .venv/
@@ -11,14 +12,28 @@ venv/
 .ipynb_checkpoints/
 .DS_Store
 
-# Local datasets and experiment outputs
+# Datasets
 wildtrack/
-outputs/
+wiltrack/
+data/
+datasets/
 
-# Model checkpoints and logs
+# Run outputs (ignore all except placeholder)
+runs/*
+!runs/.gitkeep
+
+# Model files
+*.pt
 *.pth
+*.ckpt
+*.onnx
+
+# Other logs
 training_log.txt
 
-# Colab automation local runtime artifacts
-colab_automation/.env
-colab_automation/runtime/
+# Keep ai_runs tracked
+!ai_runs/latest/metrics.json
+!ai_runs/latest/train_tail.log
+!ai_runs/latest/error.log
+!ai_runs/latest/ai_context.md
+!ai_runs/history/.gitkeep
