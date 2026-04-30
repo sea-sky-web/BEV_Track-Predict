@@ -17,3 +17,4 @@ tensorboard>=2.14
 # Colab Automation
 playwright>=1.42
 python-dotenv>=1.0
+pyyaml
