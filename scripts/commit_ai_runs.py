@@ -96,24 +96,26 @@ def main() -> int:
     (latest_dir / "ai_context.md").write_text(context, encoding="utf-8")
     (history_dir / "ai_context.md").write_text(context, encoding="utf-8")
 
-    run_git(["add", "ai_runs/"])
-    commit_msg = f"add training result: {exp_name} {timestamp}"
-    commit_res = run_git(["commit", "-m", commit_msg])
-    if commit_res.returncode != 0 and "nothing to commit" not in (commit_res.stdout + commit_res.stderr).lower():
-        print(commit_res.stdout)
-        print(commit_res.stderr)
-        return 1
-
     token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        print("GITHUB_TOKEN not found, ai_runs prepared locally, skip git commit and push.")
+        return 0
+
     user = os.getenv("GITHUB_USER")
     repo = os.getenv("GITHUB_REPO")
+    if not user or not repo or not branch:
+        print("GITHUB_USER, GITHUB_REPO, or GITHUB_BRANCH missing, skip git operations.")
+        return 0
 
-    if not token:
-        print("GITHUB_TOKEN not found, skip push.")
-        return 0
-    if not user or not repo:
-        print("GITHUB_USER or GITHUB_REPO missing, skip push.")
-        return 0
+    set_email = run_git(["config", "user.email", "colab-runner@example.com"])
+    if set_email.returncode != 0:
+        print(f"set git user.email failed: {set_email.stderr.strip()}")
+        return 1
+
+    set_name = run_git(["config", "user.name", "colab-runner"])
+    if set_name.returncode != 0:
+        print(f"set git user.name failed: {set_name.stderr.strip()}")
+        return 1
 
     remote_url = f"https://x-access-token:{token}@github.com/{user}/{repo}.git"
     set_url = run_git(["remote", "set-url", "origin", remote_url])
@@ -124,6 +126,26 @@ def main() -> int:
     pull_res = run_git(["pull", "origin", branch, "--rebase"])
     if pull_res.returncode != 0:
         print(f"git pull --rebase failed on branch {branch}:\n{pull_res.stdout}\n{pull_res.stderr}")
+        return 1
+
+    add_res = run_git(["add", "ai_runs/"])
+    if add_res.returncode != 0:
+        print(f"git add ai_runs failed: {add_res.stderr.strip()}")
+        return 1
+
+    diff_res = run_git(["diff", "--cached", "--quiet"])
+    if diff_res.returncode == 0:
+        print("No ai_runs changes to commit.")
+        return 0
+    if diff_res.returncode != 1:
+        print(f"git diff --cached --quiet failed: {diff_res.stderr.strip()}")
+        return 1
+
+    commit_msg = f"add training result: {exp_name} {timestamp}"
+    commit_res = run_git(["commit", "-m", commit_msg])
+    if commit_res.returncode != 0:
+        print(commit_res.stdout)
+        print(commit_res.stderr)
         return 1
 
     push_res = run_git(["push", "origin", branch])
