@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/content/BEV_Track-Predict/scripts/train_main.py", line 3, in <module>
+    from src.train_main import main
+ModuleNotFoundError: No module named 'src'
