@@ -1,0 +1,17 @@
+{
+  "exp_name": "wildtrack_baseline",
+  "success": false,
+  "return_code": 1,
+  "duration_seconds": 2.049,
+  "target_metric": "moda",
+  "target_value": 0.75,
+  "actual_metrics": {},
+  "log_path": "/content/BEV_Track-Predict/runs/wildtrack_baseline/train.log",
+  "error_path": "/content/BEV_Track-Predict/runs/wildtrack_baseline/error.log",
+  "timestamp": "20260504_034152",
+  "git_commit": "a24c09c85d7489708c9678ac0b8a1589c2e6960c",
+  "ai_feedback": {
+    "status": "need_fix",
+    "instruction": "请读取 ai_runs/latest 中的文件，分析训练结果并给出下一步修改。"
+  }
+}
