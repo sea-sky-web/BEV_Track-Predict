@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -13,11 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CFG_PATH = ROOT / "configs" / "exp_colab.yaml"
 
 
-def run_git(args: list[str], check: bool = False) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False)
-    if check and result.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result
+def run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False)
 
 
 def tail_lines(path: Path, n: int) -> str:
@@ -30,32 +26,27 @@ def tail_lines(path: Path, n: int) -> str:
 def build_ai_context() -> str:
     return """# AI Training Context
 
-This directory contains the latest Colab training result.
+Please follow this order:
 
-Please read the following files first:
-
-1. ai_runs/latest/metrics.json
-2. ai_runs/latest/error.log
-3. ai_runs/latest/train_tail.log
+1. Read `ai_runs/latest_run.txt` to get the latest timestamp.
+2. Read `ai_runs/{timestamp}/metrics.json`.
+3. Read `ai_runs/{timestamp}/error.log` and `ai_runs/{timestamp}/train_tail.log`.
 
 Your task:
-- If the previous training failed, fix the code according to error.log.
-- If the training succeeded but metrics are poor, make a small and testable improvement.
-- Keep the Colab entry command unchanged:
-  python scripts/run_colab_exp.py
-- Do not delete ai_runs.
-- Do not commit model checkpoints or large datasets.
+- If training failed, fix the error according to `error.log`.
+- If training succeeded but metrics are poor, make a small, testable optimization.
+- Keep the training entry command unchanged:
+  `python scripts/run_colab_exp.py`
+- Do not commit `runs/`, `wildtrack/`, model weights, or datasets.
 - Keep changes minimal and explain why they help.
 """
 
 
 def main() -> int:
     cfg = yaml.safe_load(CFG_PATH.read_text(encoding="utf-8")) or {}
-    output_dir = Path(str(cfg.get("output_dir", ROOT / "runs" / cfg.get("exp_name", "colab_exp"))))
-    latest_dir = ROOT / str(cfg.get("git", {}).get("latest_dir", "ai_runs/latest"))
-    history_root = ROOT / str(cfg.get("git", {}).get("history_dir", "ai_runs/history"))
-    branch = os.getenv("GITHUB_BRANCH", str(cfg.get("git", {}).get("branch", "main")))
     exp_name = str(cfg.get("exp_name", "colab_exp"))
+    output_dir = Path(str(cfg.get("output_dir", ROOT / "runs" / exp_name)))
+    branch = os.getenv("GITHUB_BRANCH", str(cfg.get("git", {}).get("branch", "main")))
     log_tail_n = int(cfg.get("log_tail_lines", 500))
 
     metrics_path = output_dir / "metrics.json"
@@ -66,39 +57,30 @@ def main() -> int:
     if metrics_path.exists():
         try:
             metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-            timestamp = str(metrics.get("timestamp", timestamp))
+            timestamp = str(metrics.get("timestamp") or timestamp)
         except Exception:
             pass
 
-    latest_dir.mkdir(parents=True, exist_ok=True)
-    history_dir = history_root / timestamp
-    history_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = ROOT / "ai_runs" / timestamp
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     if metrics_path.exists():
-        shutil.copy2(metrics_path, latest_dir / "metrics.json")
-        shutil.copy2(metrics_path, history_dir / "metrics.json")
+        (run_dir / "metrics.json").write_text(metrics_path.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
     else:
-        (latest_dir / "metrics.json").write_text("{}\n", encoding="utf-8")
-        (history_dir / "metrics.json").write_text("{}\n", encoding="utf-8")
+        (run_dir / "metrics.json").write_text("{}\n", encoding="utf-8")
 
     if error_log.exists():
-        shutil.copy2(error_log, latest_dir / "error.log")
-        shutil.copy2(error_log, history_dir / "error.log")
+        (run_dir / "error.log").write_text(error_log.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
     else:
-        (latest_dir / "error.log").write_text("", encoding="utf-8")
-        (history_dir / "error.log").write_text("", encoding="utf-8")
+        (run_dir / "error.log").write_text("", encoding="utf-8")
 
-    train_tail = tail_lines(train_log, log_tail_n)
-    (latest_dir / "train_tail.log").write_text(train_tail, encoding="utf-8")
-    (history_dir / "train_tail.log").write_text(train_tail, encoding="utf-8")
-
-    context = build_ai_context()
-    (latest_dir / "ai_context.md").write_text(context, encoding="utf-8")
-    (history_dir / "ai_context.md").write_text(context, encoding="utf-8")
+    (run_dir / "train_tail.log").write_text(tail_lines(train_log, log_tail_n), encoding="utf-8")
+    (run_dir / "ai_context.md").write_text(build_ai_context(), encoding="utf-8")
+    (ROOT / "ai_runs" / "latest_run.txt").write_text(f"{timestamp}\n", encoding="utf-8")
 
     token = os.getenv("GITHUB_TOKEN")
     if not token:
-        print("GITHUB_TOKEN not found, ai_runs prepared locally, skip git commit and push.")
+        print("GITHUB_TOKEN not found, ai_runs prepared locally, skip git operations.")
         return 0
 
     user = os.getenv("GITHUB_USER")
@@ -123,11 +105,6 @@ def main() -> int:
         print(f"set remote url failed: {set_url.stderr.strip()}")
         return 1
 
-    pull_res = run_git(["pull", "origin", branch, "--rebase"])
-    if pull_res.returncode != 0:
-        print(f"git pull --rebase failed on branch {branch}:\n{pull_res.stdout}\n{pull_res.stderr}")
-        return 1
-
     add_res = run_git(["add", "ai_runs/"])
     if add_res.returncode != 0:
         print(f"git add ai_runs failed: {add_res.stderr.strip()}")
@@ -150,7 +127,14 @@ def main() -> int:
 
     push_res = run_git(["push", "origin", branch])
     if push_res.returncode != 0:
-        print(f"git push failed on branch {branch}:\n{push_res.stdout}\n{push_res.stderr}")
+        stderr = (push_res.stderr or "").lower()
+        if "non-fast-forward" in stderr or "fetch first" in stderr or "rejected" in stderr:
+            print(
+                "git push failed because remote has new commits. "
+                "Please pull/rebase manually and retry; this script will not auto-rebase."
+            )
+        else:
+            print(f"git push failed on branch {branch}:\n{push_res.stdout}\n{push_res.stderr}")
         return 1
 
     print("ai_runs committed and pushed.")
