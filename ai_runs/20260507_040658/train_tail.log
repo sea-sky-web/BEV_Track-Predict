@@ -1,0 +1,2 @@
+[launcher] train_command: python scripts/train_main.py --data_root /content/BEV_Track-Predict/wildtrack --epochs 10 --batch 2
+[DEV] device=cuda, cuda_available=False
