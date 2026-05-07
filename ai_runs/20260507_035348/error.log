@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/content/BEV_Track-Predict/scripts/train_main.py", line 12, in <module>
+    from src.train_main import main
+  File "/content/BEV_Track-Predict/src/train_main.py", line 13, in <module>
+    from config import (
+ModuleNotFoundError: No module named 'config'
