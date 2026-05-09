@@ -5,11 +5,13 @@ import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG_PATH = ROOT / "configs" / "exp_colab.yaml"
+LATEST_RUN_PATH = ROOT / "ai_runs" / "latest_run.txt"
 
 
 def run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -23,22 +25,189 @@ def tail_lines(path: Path, n: int) -> str:
     return "\n".join(lines[-n:]) + ("\n" if lines else "")
 
 
-def build_ai_context() -> str:
-    return """# AI Training Context
+def read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
-Please follow this order:
 
-1. Read `ai_runs/latest_run.txt` to get the latest timestamp.
-2. Read `ai_runs/{timestamp}/metrics.json`.
-3. Read `ai_runs/{timestamp}/error.log` and `ai_runs/{timestamp}/train_tail.log`.
+def read_previous_iteration(current_timestamp: str) -> tuple[str, dict[str, Any]]:
+    if not LATEST_RUN_PATH.exists():
+        return "", {}
+    previous_timestamp = LATEST_RUN_PATH.read_text(encoding="utf-8", errors="ignore").strip()
+    if not previous_timestamp or previous_timestamp == current_timestamp:
+        return "", {}
+    previous_metrics = read_json(ROOT / "ai_runs" / previous_timestamp / "metrics.json")
+    return previous_timestamp, previous_metrics
 
-Your task:
-- If training failed, fix the error according to `error.log`.
-- If training succeeded but metrics are poor, make a small, testable optimization.
-- Keep the training entry command unchanged:
-  `python scripts/run_colab_exp.py`
-- Do not commit `runs/`, `wildtrack/`, model weights, or datasets.
-- Keep changes minimal and explain why they help.
+
+def _metric(metrics: dict[str, Any], key: str, default: str = "Unavailable") -> Any:
+    actual = metrics.get("actual_metrics")
+    if isinstance(actual, dict) and key in actual:
+        return actual[key]
+    return metrics.get(key, default)
+
+
+def _fmt(value: Any) -> str:
+    if value is None:
+        return "Unavailable"
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
+
+
+def metric_summary(metrics: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "Precision": _metric(metrics, "det_precision"),
+        "Recall": _metric(metrics, "det_recall"),
+        "F1": _metric(metrics, "det_f1"),
+        "Localization error": _metric(metrics, "det_loc_err_m"),
+        "False positives": _metric(metrics, "det_fp"),
+        "Missed detections": _metric(metrics, "det_fn"),
+    }
+
+
+def format_metric_block(metrics: dict[str, Any]) -> str:
+    summary = metric_summary(metrics)
+    return "\n".join(f"{name}: {_fmt(value)}" for name, value in summary.items())
+
+
+def build_ai_context(
+    current_metrics: dict[str, Any],
+    previous_timestamp: str,
+    previous_metrics: dict[str, Any],
+    cfg: dict[str, Any],
+    timestamp: str,
+) -> str:
+    actual = current_metrics.get("actual_metrics") if isinstance(current_metrics.get("actual_metrics"), dict) else {}
+    exp_cfg = current_metrics.get("experiment_config") if isinstance(current_metrics.get("experiment_config"), dict) else {}
+    success = bool(current_metrics.get("success"))
+    status = "success" if success else "failed"
+    views = exp_cfg.get("views", current_metrics.get("views", "Unavailable"))
+    max_frames = exp_cfg.get("max_frames", current_metrics.get("max_frames", "Unavailable"))
+    fusion_mode = exp_cfg.get("fusion_mode", current_metrics.get("fusion_mode", "concat"))
+    checkpoint_path = exp_cfg.get("checkpoint_path", current_metrics.get("checkpoint_path", "Unavailable"))
+    train_command = exp_cfg.get("train_command", cfg.get("train_command", []))
+    train_command_text = " ".join(str(x) for x in train_command) if isinstance(train_command, list) else str(train_command)
+
+    current_f1 = _metric(current_metrics, "det_f1")
+    current_precision = _metric(current_metrics, "det_precision")
+    current_recall = _metric(current_metrics, "det_recall")
+    current_fp = _metric(current_metrics, "det_fp")
+    current_fn = _metric(current_metrics, "det_fn")
+
+    if success and actual:
+        observed_problem = (
+            "Training and evaluation completed, but the detection result is weak: "
+            f"F1={_fmt(current_f1)}, precision={_fmt(current_precision)}, recall={_fmt(current_recall)}, "
+            f"false positives={_fmt(current_fp)}, missed detections={_fmt(current_fn)}."
+        )
+        interpretation = "Inconclusive. This run is a baseline measurement until a same-configuration comparison exists."
+    elif success:
+        observed_problem = "Training completed, but evaluation metrics are incomplete or unavailable."
+        interpretation = "Inconclusive. Required detection metrics are missing."
+    else:
+        observed_problem = "Training or evaluation failed. See error.log."
+        interpretation = "No. The run failed and must be fixed before model optimization."
+
+    previous_iteration = f"ai_runs/{previous_timestamp}/" if previous_timestamp else "No previous formal iteration."
+    previous_block = format_metric_block(previous_metrics) if previous_metrics else (
+        "Precision: Unavailable\n"
+        "Recall: Unavailable\n"
+        "F1: Unavailable\n"
+        "Localization error: Unavailable\n"
+        "False positives: Unavailable\n"
+        "Missed detections: Unavailable"
+    )
+    current_block = format_metric_block(current_metrics)
+
+    return f"""# AI Iteration Context
+
+## 1. Iteration ID
+
+{timestamp}
+
+## 2. Previous Iteration
+
+{previous_iteration}
+
+## 3. Previous Metrics Summary
+
+{previous_block}
+Main failure: {_fmt(_metric(previous_metrics, 'main_failure')) if previous_metrics else 'Unavailable'}
+
+## 4. Observed Problem
+
+{observed_problem}
+
+## 5. Improvement Hypothesis
+
+Because the current run needs a controlled comparison before any model-level claim,
+we preserve the training entrypoint and record the comparison-critical settings,
+expecting the next iteration to compare metrics under the same dataset, views, max_frames, checkpoint rule, threshold sweep, and fusion_mode.
+
+## 6. Changes Made
+
+Changed files:
+- scripts/run_colab_exp.py: records dataset, views, max_frames, fusion_mode, actual checkpoint_path, and train_command in metrics.json.
+- scripts/commit_ai_runs.py: separates previous-run metrics from current-run metrics in ai_context.md.
+- docs/iteration_records/ITERATION_002.md: records the diagnostic decision and change boundary.
+
+## 7. Training Configuration
+
+dataset: WildTrack
+views: {_fmt(views)}
+epochs: {_fmt(exp_cfg.get('epochs', 'Unavailable'))}
+batch_size: {_fmt(exp_cfg.get('batch_size', 'Unavailable'))}
+learning_rate: Unavailable
+max_frames: {_fmt(max_frames)}
+device: Unavailable
+seed: Unavailable
+checkpoint_path: {_fmt(checkpoint_path)}
+fusion_mode: {_fmt(fusion_mode)}
+train_command: {train_command_text}
+
+## 8. Evaluation Configuration
+
+model_path: {_fmt(checkpoint_path)}
+views: {_fmt(views)}
+threshold: {_fmt(_metric(current_metrics, 'det_best_threshold'))}
+distance_threshold: Unavailable
+metrics_output: metrics.json
+device: Unavailable
+max_frames: {_fmt(max_frames)}
+
+## 9. Current Metrics
+
+{current_block}
+Status: {status}
+
+## 10. Result Interpretation
+
+{interpretation}
+
+## 11. Next Iteration Recommendation
+
+Next action:
+Run the next Colab training/evaluation after this logging change and verify that metrics.json contains dataset, views, max_frames, fusion_mode, checkpoint_path, and detection metrics.
+
+Reason:
+Without these fields, future model changes cannot be compared safely under the experiment protocol.
+
+Expected validation:
+A new ai_runs timestamp whose metrics.json has both detection metrics and comparison-critical configuration fields.
+
+## 12. Do Not Do Next
+
+Do not implement tracking.
+Do not implement ReID.
+Do not implement trajectory prediction.
+Do not introduce BEVFormer, PETR, LSS, DETR3D, or other large BEV frameworks.
+Do not claim model improvement until metrics are compared under the same configuration.
 """
 
 
@@ -53,13 +222,9 @@ def main() -> int:
     train_log = output_dir / "train.log"
     error_log = output_dir / "error.log"
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if metrics_path.exists():
-        try:
-            metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-            timestamp = str(metrics.get("timestamp") or timestamp)
-        except Exception:
-            pass
+    metrics = read_json(metrics_path)
+    timestamp = str(metrics.get("timestamp") or datetime.now().strftime("%Y%m%d_%H%M%S"))
+    previous_timestamp, previous_metrics = read_previous_iteration(timestamp)
 
     run_dir = ROOT / "ai_runs" / timestamp
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -70,13 +235,19 @@ def main() -> int:
         (run_dir / "metrics.json").write_text("{}\n", encoding="utf-8")
 
     if error_log.exists():
-        (run_dir / "error.log").write_text(error_log.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+        error_text = error_log.read_text(encoding="utf-8", errors="ignore")
+        if error_text.strip() == "":
+            error_text = "No error.\n"
+        (run_dir / "error.log").write_text(error_text, encoding="utf-8")
     else:
-        (run_dir / "error.log").write_text("", encoding="utf-8")
+        (run_dir / "error.log").write_text("No error.\n", encoding="utf-8")
 
     (run_dir / "train_tail.log").write_text(tail_lines(train_log, log_tail_n), encoding="utf-8")
-    (run_dir / "ai_context.md").write_text(build_ai_context(), encoding="utf-8")
-    (ROOT / "ai_runs" / "latest_run.txt").write_text(f"{timestamp}\n", encoding="utf-8")
+    (run_dir / "ai_context.md").write_text(
+        build_ai_context(metrics, previous_timestamp, previous_metrics, cfg, timestamp),
+        encoding="utf-8",
+    )
+    LATEST_RUN_PATH.write_text(f"{timestamp}\n", encoding="utf-8")
 
     token = os.getenv("GITHUB_TOKEN")
     if not token:
