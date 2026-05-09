@@ -130,7 +130,7 @@ views: {_fmt(views)}
 threshold: {_fmt(_metric(metrics, 'det_best_threshold'))}
 distance_threshold: Unavailable
 metrics_output: metrics.json
-nodevice: Unavailable
+device: Unavailable
 max_frames: {_fmt(max_frames)}
 
 ## 9. Current Metrics
