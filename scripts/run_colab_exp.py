@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from datetime import datetime
@@ -11,6 +12,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG_PATH = ROOT / "configs" / "exp_colab.yaml"
+DEFAULT_CHECKPOINT_REL = Path("outputs/train_multicam_mvdet_style_v3/model_final.pth")
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -52,6 +54,87 @@ def try_read_existing_metrics(output_dir: Path) -> dict[str, Any]:
     return merged
 
 
+def _flag_value(command: list[str], flag: str, default: Any = None) -> Any:
+    try:
+        idx = command.index(flag)
+    except ValueError:
+        return default
+    if idx + 1 >= len(command):
+        return default
+    return command[idx + 1]
+
+
+def _int_flag_value(command: list[str], flag: str, default: Any = None) -> Any:
+    value = _flag_value(command, flag, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _repo_path(raw: str | Path) -> Path:
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return ROOT / path
+
+
+def _checkpoint_from_train_log(train_log: Path) -> str | None:
+    if not train_log.exists():
+        return None
+    text = train_log.read_text(encoding="utf-8", errors="ignore")
+    matches = re.findall(r"\[OK\]\s+saved\s+(.+?model_final\.pth)", text)
+    if not matches:
+        return None
+    return str(_repo_path(matches[-1].strip()))
+
+
+def resolve_checkpoint_path(cfg: dict[str, Any], train_command: list[str], train_log: Path) -> str:
+    configured = cfg.get("checkpoint_path")
+    if configured:
+        return str(_repo_path(str(configured)))
+
+    logged = _checkpoint_from_train_log(train_log)
+    if logged:
+        return logged
+
+    output_arg = _flag_value(train_command, "--output_dir", None)
+    if output_arg:
+        return str(_repo_path(output_arg) / "model_final.pth")
+
+    return str(ROOT / DEFAULT_CHECKPOINT_REL)
+
+
+def build_experiment_config(
+    cfg: dict[str, Any],
+    train_command: list[str],
+    train_log: Path,
+) -> dict[str, Any]:
+    views = str(cfg.get("views") or _flag_value(train_command, "--views", "0,1,2"))
+    max_frames = cfg.get("max_frames")
+    if max_frames is None:
+        max_frames = _int_flag_value(train_command, "--max_frames", None)
+    epochs = cfg.get("epochs")
+    if epochs is None:
+        epochs = _int_flag_value(train_command, "--epochs", None)
+    batch_size = cfg.get("batch_size")
+    if batch_size is None:
+        batch_size = _int_flag_value(train_command, "--batch", None)
+
+    return {
+        "dataset": "WildTrack",
+        "data_root": str(cfg.get("data_root") or _flag_value(train_command, "--data_root", "wildtrack")),
+        "views": views,
+        "max_frames": max_frames,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "fusion_mode": str(cfg.get("fusion_mode", "concat")),
+        "train_command": train_command,
+        "checkpoint_path": resolve_checkpoint_path(cfg, train_command, train_log),
+        "metrics_sources": ["actual_metrics.json", "eval_metrics.json", "metrics_raw.json"],
+    }
+
+
 def main() -> int:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     start = time.time()
@@ -86,7 +169,11 @@ def main() -> int:
         with error_log.open("a", encoding="utf-8") as err_f:
             err_f.write(f"[launcher_exception] {exc_text}\n")
 
+    if success and error_log.exists() and error_log.read_text(encoding="utf-8", errors="ignore").strip() == "":
+        error_log.write_text("No error.\n", encoding="utf-8")
+
     actual_metrics = try_read_existing_metrics(output_dir)
+    experiment_config = build_experiment_config(cfg, train_command, train_log)
 
     status = "target_reached" if success else "need_fix"
     if success and target_metric and isinstance(actual_metrics, dict):
@@ -103,6 +190,12 @@ def main() -> int:
         "duration_seconds": round(time.time() - start, 3),
         "target_metric": target_metric,
         "target_value": target_value,
+        "experiment_config": experiment_config,
+        "dataset": experiment_config["dataset"],
+        "views": experiment_config["views"],
+        "max_frames": experiment_config["max_frames"],
+        "fusion_mode": experiment_config["fusion_mode"],
+        "checkpoint_path": experiment_config["checkpoint_path"],
         "actual_metrics": actual_metrics,
         "log_path": str(train_log),
         "error_path": str(error_log),
