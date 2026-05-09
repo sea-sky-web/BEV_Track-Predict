@@ -52,6 +52,51 @@ def try_read_existing_metrics(output_dir: Path) -> dict[str, Any]:
     return merged
 
 
+def _flag_value(command: list[str], flag: str, default: Any = None) -> Any:
+    try:
+        idx = command.index(flag)
+    except ValueError:
+        return default
+    if idx + 1 >= len(command):
+        return default
+    return command[idx + 1]
+
+
+def _int_flag_value(command: list[str], flag: str, default: Any = None) -> Any:
+    value = _flag_value(command, flag, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def build_experiment_config(cfg: dict[str, Any], train_command: list[str], output_dir: Path) -> dict[str, Any]:
+    """Collect comparison-critical settings without changing the train entrypoint."""
+    views = str(cfg.get("views") or _flag_value(train_command, "--views", "0,1,2"))
+    max_frames = cfg.get("max_frames")
+    if max_frames is None:
+        max_frames = _int_flag_value(train_command, "--max_frames", None)
+    epochs = cfg.get("epochs")
+    if epochs is None:
+        epochs = _int_flag_value(train_command, "--epochs", None)
+    batch_size = cfg.get("batch_size")
+    if batch_size is None:
+        batch_size = _int_flag_value(train_command, "--batch", None)
+
+    return {
+        "dataset": "WildTrack",
+        "data_root": str(cfg.get("data_root") or _flag_value(train_command, "--data_root", "wildtrack")),
+        "views": views,
+        "max_frames": max_frames,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "fusion_mode": str(cfg.get("fusion_mode", "concat")),
+        "train_command": train_command,
+        "checkpoint_path": str(cfg.get("checkpoint_path", output_dir / "model_final.pth")),
+        "metrics_sources": ["actual_metrics.json", "eval_metrics.json", "metrics_raw.json"],
+    }
+
+
 def main() -> int:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     start = time.time()
@@ -66,6 +111,7 @@ def main() -> int:
     train_command = [str(x) for x in cfg.get("train_command", ["python", "scripts/train_main.py"])]
     target_metric = cfg.get("target_metric", "")
     target_value = cfg.get("target_value", None)
+    experiment_config = build_experiment_config(cfg, train_command, output_dir)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     train_log = output_dir / "train.log"
@@ -86,6 +132,9 @@ def main() -> int:
         with error_log.open("a", encoding="utf-8") as err_f:
             err_f.write(f"[launcher_exception] {exc_text}\n")
 
+    if success and error_log.exists() and error_log.read_text(encoding="utf-8", errors="ignore").strip() == "":
+        error_log.write_text("No error.\n", encoding="utf-8")
+
     actual_metrics = try_read_existing_metrics(output_dir)
 
     status = "target_reached" if success else "need_fix"
@@ -103,6 +152,12 @@ def main() -> int:
         "duration_seconds": round(time.time() - start, 3),
         "target_metric": target_metric,
         "target_value": target_value,
+        "experiment_config": experiment_config,
+        "dataset": experiment_config["dataset"],
+        "views": experiment_config["views"],
+        "max_frames": experiment_config["max_frames"],
+        "fusion_mode": experiment_config["fusion_mode"],
+        "checkpoint_path": experiment_config["checkpoint_path"],
         "actual_metrics": actual_metrics,
         "log_path": str(train_log),
         "error_path": str(error_log),
