@@ -6,7 +6,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 import yaml
 
@@ -72,14 +72,14 @@ def _int_flag_value(command: list[str], flag: str, default: Any = None) -> Any:
         return default
 
 
-def _repo_path(raw: str | Path) -> Path:
+def _repo_path(raw: Union[str, Path]) -> Path:
     path = Path(raw)
     if path.is_absolute():
         return path
     return ROOT / path
 
 
-def _checkpoint_from_train_log(train_log: Path) -> str | None:
+def _checkpoint_from_train_log(train_log: Path) -> Optional[str]:
     if not train_log.exists():
         return None
     text = train_log.read_text(encoding="utf-8", errors="ignore")
