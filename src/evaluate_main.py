@@ -101,6 +101,12 @@ def parse_args() -> argparse.Namespace:
     )
     ap.add_argument("--det_dist_thr", type=float, default=3.0, help="Match distance threshold (BEV cells)")
     ap.add_argument("--det_nms_ksize", type=int, default=3, help="NMS kernel size (odd int)")
+    ap.add_argument(
+        "--det_min_distance",
+        type=float,
+        default=0.0,
+        help="Optional greedy suppression distance between predicted BEV peaks. 0 disables it.",
+    )
     ap.add_argument("--det_max_preds", type=int, default=200, help="Max predictions per frame after NMS")
 
     ap.add_argument(
@@ -283,11 +289,14 @@ def _extract_points(
     threshold: float,
     nms_ksize: int,
     max_preds: int,
+    min_distance: float = 0.0,
 ) -> np.ndarray:
     if heatmap.ndim != 2:
         raise ValueError(f"Expected 2D heatmap, got shape {tuple(heatmap.shape)}")
     if nms_ksize <= 0 or nms_ksize % 2 == 0:
         raise ValueError(f"det_nms_ksize must be a positive odd integer, got {nms_ksize}")
+    if min_distance < 0.0:
+        raise ValueError(f"det_min_distance must be >= 0, got {min_distance}")
 
     hm = heatmap.float()
     pooled = F.max_pool2d(
@@ -303,12 +312,33 @@ def _extract_points(
 
     scores = hm[ys, xs]
     order = torch.argsort(scores, descending=True)
-    if max_preds > 0:
-        order = order[:max_preds]
+    ys = ys[order].float()
+    xs = xs[order].float()
+    scores = scores[order].float()
 
-    ys = ys[order].float().cpu().numpy()
-    xs = xs[order].float().cpu().numpy()
-    scores = scores[order].float().cpu().numpy()
+    if min_distance > 0.0 and ys.numel() > 1:
+        keep_mask = torch.ones(ys.numel(), dtype=torch.bool, device=ys.device)
+        for i in range(ys.numel()):
+            if not keep_mask[i]:
+                continue
+            dy = ys[i + 1 :] - ys[i]
+            dx = xs[i + 1 :] - xs[i]
+            too_close = (dy * dy + dx * dx) < (min_distance * min_distance)
+            if too_close.any():
+                suppress_idx = torch.nonzero(too_close, as_tuple=False).view(-1) + i + 1
+                keep_mask[suppress_idx] = False
+        ys = ys[keep_mask]
+        xs = xs[keep_mask]
+        scores = scores[keep_mask]
+
+    if max_preds > 0:
+        ys = ys[:max_preds]
+        xs = xs[:max_preds]
+        scores = scores[:max_preds]
+
+    ys = ys.cpu().numpy()
+    xs = xs.cpu().numpy()
+    scores = scores.cpu().numpy()
     return np.stack([ys, xs, scores], axis=1).astype(np.float32)
 
 
@@ -344,6 +374,7 @@ def evaluate_detection(
     nms_ksize: int,
     max_preds: int,
     bev_cell_m: float,
+    min_distance: float,
 ) -> Tuple[List[Dict[str, float]], Dict[str, float]]:
     rows: List[Dict[str, float]] = []
     if len(pred_maps) != len(gt_maps):
@@ -356,7 +387,13 @@ def evaluate_detection(
         dist_sum = 0.0
 
         for pred_map, gt_map in zip(pred_maps, gt_maps):
-            pred_pts = _extract_points(pred_map, thr, nms_ksize=nms_ksize, max_preds=max_preds)
+            pred_pts = _extract_points(
+                pred_map,
+                thr,
+                nms_ksize=nms_ksize,
+                max_preds=max_preds,
+                min_distance=min_distance,
+            )
             pred_yx = pred_pts[:, :2] if pred_pts.size else np.empty((0, 2), dtype=np.float32)
 
             gt_yx = torch.nonzero(gt_map > 0, as_tuple=False).cpu().numpy().astype(np.float32)
@@ -537,7 +574,14 @@ def main() -> Dict[str, float]:
         "total_params": float(total_params),
         "trainable_params": float(trainable_params),
     }
-    output_payload: Dict[str, object] = dict(final_metrics)
+    extraction_config: Dict[str, object] = {
+        "det_min_distance": float(args.det_min_distance),
+        "det_nms_ksize": int(args.det_nms_ksize),
+        "det_max_preds": int(args.det_max_preds),
+        "det_dist_thr": float(args.det_dist_thr),
+        "det_thresholds": args.det_thresholds,
+    }
+    output_payload: Dict[str, object] = {**final_metrics, **extraction_config, "extraction_config": extraction_config}
 
     if args.report_detection:
         thresholds = parse_thresholds(args.det_thresholds)
@@ -550,6 +594,7 @@ def main() -> Dict[str, float]:
             nms_ksize=args.det_nms_ksize,
             max_preds=args.det_max_preds,
             bev_cell_m=bev_cell_m,
+            min_distance=args.det_min_distance,
         )
         _print_detection_table(rows, best_threshold=best["threshold"])
 
@@ -569,8 +614,12 @@ def main() -> Dict[str, float]:
                 "det_recall": float(best["recall"]),
                 "det_f1": float(best["f1"]),
                 "det_loc_err_m": float(best["loc_err_m"]),
+                "det_tp": float(best["tp"]),
+                "det_fp": float(best["fp"]),
+                "det_fn": float(best["fn"]),
             }
         )
+        output_payload.update(final_metrics)
         output_payload["det_sweep"] = rows
         output_payload["det_best"] = best
 
