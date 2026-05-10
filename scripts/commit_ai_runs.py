@@ -171,6 +171,11 @@ device: Unavailable
 seed: Unavailable
 checkpoint_path: {_fmt(checkpoint_path)}
 fusion_mode: {_fmt(fusion_mode)}
+loss_type: {_fmt(exp_cfg.get('loss_type', 'mse'))}
+pos_weight: {_fmt(exp_cfg.get('pos_weight', '1.0'))}
+neg_weight: {_fmt(exp_cfg.get('neg_weight', '1.0'))}
+focal_alpha: {_fmt(exp_cfg.get('focal_alpha', '2.0'))}
+focal_beta: {_fmt(exp_cfg.get('focal_beta', '4.0'))}
 train_command: {train_command_text}
 
 ## 8. Evaluation Configuration

@@ -13,23 +13,6 @@ import torch.nn.functional as F
 class GaussianMSE(nn.Module):
     """
     MVDet 风格的高斯 MSE 损失函数
-    
-    处理流程：
-    1. 将目标热图自适应池化到预测尺寸
-    2. 对目标应用高斯卷积平滑
-    3. 计算预测与平滑目标的 MSE
-    
-    这种方法优于直接 MSE，因为：
-    - 高斯模糊提供软标签而非硬标签
-    - 允许预测在目标周围有梯度
-    - 更容易优化
-    
-    Attributes:
-        无（无需初始化参数）
-        
-    References:
-        基于 MVDet: A Baseline for Multi-View 3D Pedestrian Detection
-        (https://github.com/hou-yz/MVDet)
     """
     
     def __init__(self):
@@ -41,82 +24,25 @@ class GaussianMSE(nn.Module):
         target: torch.Tensor,
         kernel: torch.Tensor
     ) -> torch.Tensor:
-        """
-        计算高斯 MSE 损失
-        
-        Args:
-            pred: 预测热图 (B, C, H, W)
-                  通常已通过 sigmoid 归一化到 [0, 1]
-                  
-            target: 目标热图 (B, C, Ht, Wt)
-                   通常为二值图像（0 或 1）
-                   Ht, Wt 可能与 H, W 不同
-                   
-            kernel: 高斯核 (1, 1, K, K)
-                   由 build_gaussian_kernel_2d() 生成
-                   
-        Returns:
-            torch.Tensor: 标量损失值
-            
-        Shape:
-            - pred: (B, C, H, W)
-            - target: (B, C, Ht, Wt) 其中 Ht, Wt >= H, W
-            - kernel: (1, 1, K, K)
-            - output: 标量
-            
-        Example:
-            >>> import torch
-            >>> from utils import build_gaussian_kernel_2d
-            >>> criterion = GaussianMSE()
-            >>> pred = torch.sigmoid(torch.randn(2, 1, 64, 64))
-            >>> target = torch.randint(0, 2, (2, 1, 128, 128)).float()
-            >>> kernel = build_gaussian_kernel_2d(11, 2.5, torch.device("cpu"))
-            >>> loss = criterion(pred, target, kernel)
-            >>> print(f"Loss: {loss.item():.6f}")
-        """
         B, C, H, W = pred.shape
-        
-        # 步骤 1: 自适应池化目标到预测尺寸
-        # 使用 max 池化保留目标信号，避免平均化稀疏标签
         target = F.adaptive_max_pool2d(target, output_size=(H, W))
-        
-        # 步骤 2: 应用高斯卷积平滑
-        # 将多通道重塑为 (B*C, 1, H, W) 以支持单通道卷积
         tgt = target.reshape(B * C, 1, H, W)
-        
-        # 确保核的数据类型和设备与目标一致
         k = kernel.to(dtype=tgt.dtype, device=tgt.device)
-        
-        # 计算填充大小
         pad = (k.shape[-1] - 1) // 2
-        
-        # 应用高斯卷积
         tgt = F.conv2d(tgt, k, padding=pad)
-        
-        # 恢复为多通道形状
         tgt = tgt.reshape(B, C, H, W)
-        
-        # 步骤 3: 计算 MSE 损失
         return F.mse_loss(pred, tgt)
 
 
 class WeightedGaussianMSE(nn.Module):
     """
-    带权重的高斯 MSE 损失（可选的高级版本）
-    
-    允许对正样本和负样本给予不同权重，
-    适合处理不平衡的检测任务。
-    
-    Args:
-        pos_weight: 正样本权重，默认 1.0
-        neg_weight: 负样本权重，默认 1.0
+    带权重的高斯 MSE 损失
     """
     
     def __init__(self, pos_weight: float = 1.0, neg_weight: float = 1.0):
         super().__init__()
         self.pos_weight = pos_weight
         self.neg_weight = neg_weight
-        self.base_criterion = GaussianMSE()
 
     def forward(
         self,
@@ -124,31 +50,16 @@ class WeightedGaussianMSE(nn.Module):
         target: torch.Tensor,
         kernel: torch.Tensor
     ) -> torch.Tensor:
-        """
-        计算带权重的高斯 MSE 损失
-        
-        Args:
-            pred: 预测热图 (B, C, H, W)
-            target: 目标热图 (B, C, Ht, Wt)
-            kernel: 高斯核 (1, 1, K, K)
-            
-        Returns:
-            torch.Tensor: 标量损失值
-        """
         B, C, H, W = pred.shape
         target = F.adaptive_max_pool2d(target, output_size=(H, W))
-        
         tgt = target.reshape(B * C, 1, H, W)
         k = kernel.to(dtype=tgt.dtype, device=tgt.device)
         pad = (k.shape[-1] - 1) // 2
         tgt = F.conv2d(tgt, k, padding=pad)
         tgt = tgt.reshape(B, C, H, W)
         
-        # 计算加权 MSE
         diff = (pred - tgt) ** 2
-        
-        # 对正负样本应用不同权重
-        pos_mask = tgt > 0.5
+        pos_mask = tgt > 0.1
         neg_mask = ~pos_mask
         
         weighted_diff = diff.clone()
@@ -158,27 +69,91 @@ class WeightedGaussianMSE(nn.Module):
         return weighted_diff.mean()
 
 
+class FocalLoss(nn.Module):
+    """
+    针对热图优化的 Focal Loss (Modified for heatmaps as in CornerNet/CenterNet)
+    
+    L = -1/N * sum(
+        (1-p)^gamma * log(p)           if y=1
+        (1-y)^beta * p^gamma * log(1-p) if y<1
+    )
+    
+    Args:
+        alpha: 正负样本权重 (CornerNet/CenterNet typically don't use alpha here)
+        gamma: 难易样本权重，通常取 2
+        beta: 负样本惩罚权重，通常取 4
+    """
+    
+    def __init__(self, alpha: float = 2.0, beta: float = 4.0):
+        super().__init__()
+        self.alpha = alpha  # alpha is gamma in standard Focal Loss terminology for heatmaps
+        self.beta = beta
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        kernel: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Args:
+            pred: 预测热图 (B, C, H, W), 已过 sigmoid
+            target: 目标热图 (B, C, Ht, Wt), 二值
+            kernel: 高斯核 (1, 1, K, K)
+        """
+        B, C, H, W = pred.shape
+        target = F.adaptive_max_pool2d(target, output_size=(H, W))
+        tgt = target.reshape(B * C, 1, H, W)
+        k = kernel.to(dtype=tgt.dtype, device=tgt.device)
+        pad = (k.shape[-1] - 1) // 2
+        tgt = F.conv2d(tgt, k, padding=pad)
+        tgt = tgt.reshape(B, C, H, W)
+        
+        # 裁剪 pred 避免 log(0)
+        pred = torch.clamp(pred, min=1e-4, max=1 - 1e-4)
+        
+        pos_inds = tgt.eq(1).float()
+        neg_inds = tgt.lt(1).float()
+
+        neg_weights = torch.pow(1 - tgt, self.beta)
+        
+        loss = 0
+        pos_loss = torch.log(pred) * torch.pow(1 - pred, self.alpha) * pos_inds
+        neg_loss = torch.log(1 - pred) * torch.pow(pred, self.alpha) * neg_weights * neg_inds
+
+        num_pos = pos_inds.float().sum()
+        pos_loss = pos_loss.sum()
+        neg_loss = neg_loss.sum()
+
+        if num_pos == 0:
+            loss = loss - neg_loss
+        else:
+            loss = loss - (pos_loss + neg_loss) / num_pos
+        return loss
+
+
 def create_loss_criterion(
-    weighted: bool = False,
+    loss_type: str = "mse",
     pos_weight: float = 1.0,
-    neg_weight: float = 1.0
+    neg_weight: float = 1.0,
+    focal_alpha: float = 2.0,
+    focal_beta: float = 4.0,
 ) -> nn.Module:
     """
     工厂函数：创建损失函数
     
     Args:
-        weighted: 是否使用带权重的损失
-        pos_weight: 正样本权重（仅当 weighted=True 时有效）
-        neg_weight: 负样本权重（仅当 weighted=True 时有效）
-        
-    Returns:
-        nn.Module: 损失函数实例
-        
-    Example:
-        >>> criterion = create_loss_criterion(weighted=False)
-        >>> criterion = create_loss_criterion(weighted=True, pos_weight=2.0, neg_weight=1.0)
+        loss_type: 'mse', 'weighted_mse', 'focal'
+        pos_weight: 正样本权重 (weighted_mse)
+        neg_weight: 负样本权重 (weighted_mse)
+        focal_alpha: Focal Loss alpha 参数 (gamma)
+        focal_beta: Focal Loss beta 参数
     """
-    if weighted:
-        return WeightedGaussianMSE(pos_weight=pos_weight, neg_weight=neg_weight)
-    else:
+    if loss_type == "mse":
         return GaussianMSE()
+    elif loss_type == "weighted_mse":
+        return WeightedGaussianMSE(pos_weight=pos_weight, neg_weight=neg_weight)
+    elif loss_type == "focal":
+        return FocalLoss(alpha=focal_alpha, beta=focal_beta)
+    else:
+        raise ValueError(f"Unknown loss_type: {loss_type}")

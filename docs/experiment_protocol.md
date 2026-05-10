@@ -35,7 +35,7 @@ False positives
 Missed detections
 ```
 
-Metric comparisons are valid only when dataset, views, thresholds, distance threshold, and point-extraction settings (NMS size, suppression distance) are held consistent.
+Metric comparisons are valid only when dataset, views, thresholds, distance threshold, point-extraction settings (NMS size, suppression distance), and loss configuration (type, weights) are held consistent.
 
 ---
 

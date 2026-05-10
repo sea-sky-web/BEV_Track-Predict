@@ -27,15 +27,18 @@ Confidence fusion produced nearly 50% more false positives than the concat basel
 
 ## Selected hypothesis
 
-Implementing an additional greedy distance-based suppression step after thresholding and local-max NMS will reduce false positives by ensuring that no two predicted points are closer than a specified minimum distance (e.g., 3.0 cells, matching the match radius).
+1. Implementing an additional greedy distance-based suppression step after thresholding and local-max NMS will reduce false positives by ensuring that no two predicted points are closer than a specified minimum distance (e.g., 3.0 cells, matching the match radius).
+2. Providing alternative training objectives like **Focal Loss** and **Weighted MSE** will allow more explicit control over the false positive vs. missed detection tradeoff during model optimization.
 
 ## Change boundary
 
-This iteration is limited to:
-- `src/evaluate_main.py`: Add `--det_min_distance` and implement greedy distance suppression in `_extract_points`. Save point-extraction settings in the metrics payload for traceability.
-- `scripts/commit_ai_runs.py`: Update `ai_context.md` template to display the new point-extraction configuration.
-- `docs/experiment_protocol.md`: Document that point-extraction settings are comparison-critical.
-- `docs/current_iteration_plan.md`: Update next actions.
+This iteration includes:
+- `src/evaluate_main.py`: Add `--det_min_distance` and implement greedy distance suppression in `_extract_points`.
+- `src/loss.py`: Implement `FocalLoss` and `WeightedGaussianMSE` with a factory function.
+- `src/trainer.py`: Support custom criterion in `MVDetTrainer`.
+- `src/train_main.py`: Add CLI arguments for `loss_type`, `pos_weight`, `neg_weight`, `focal_alpha`, `focal_beta`.
+- `scripts/run_colab_exp.py` & `scripts/commit_ai_runs.py`: Improve traceability by logging new loss and extraction configurations.
+- `docs/experiment_protocol.md`: Document that both point-extraction and loss settings are comparison-critical.
 
 No changes to model architecture, training loss, or dataset.
 

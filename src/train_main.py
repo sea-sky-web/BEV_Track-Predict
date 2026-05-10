@@ -28,6 +28,7 @@ from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_p
 from geometry import make_worldgrid2worldcoord_mat, build_mvdet_proj_mat, compute_valid_ratio_from_homography
 from dataset import create_wildtrack_dataset
 from models import create_model
+from loss import create_loss_criterion
 from trainer import MVDetTrainer, create_optimizer, create_scheduler
 from utils import build_gaussian_kernel_2d
 
@@ -85,6 +86,19 @@ def parse_args():
     ap.add_argument("--img_sigma", type=float, default=DEFAULT_IMG_SIGMA,
                     help="图像热图高斯标准差")
     
+    # 损失配置
+    ap.add_argument("--loss_type", type=str, default="mse",
+                    choices=["mse", "weighted_mse", "focal"],
+                    help="损失函数类型")
+    ap.add_argument("--pos_weight", type=float, default=1.0,
+                    help="正样本权重 (weighted_mse)")
+    ap.add_argument("--neg_weight", type=float, default=1.0,
+                    help="负样本权重 (weighted_mse)")
+    ap.add_argument("--focal_alpha", type=float, default=2.0,
+                    help="Focal Loss alpha (gamma)")
+    ap.add_argument("--focal_beta", type=float, default=4.0,
+                    help="Focal Loss beta")
+
     # 优化器和训练策略
     ap.add_argument("--pretrained", action="store_true", default=DEFAULT_PRETRAINED,
                     help="是否使用预训练权重")
@@ -275,12 +289,22 @@ def main():
     # ========== 6. 创建训练器 ==========
     print("\n[TRAIN] Creating trainer...")
     
+    criterion = create_loss_criterion(
+        loss_type=args.loss_type,
+        pos_weight=args.pos_weight,
+        neg_weight=args.neg_weight,
+        focal_alpha=args.focal_alpha,
+        focal_beta=args.focal_beta,
+    )
+    print(f"[LOSS] type={args.loss_type}")
+
     trainer = MVDetTrainer(
         model=model,
         optimizer=optimizer,
         scheduler=scheduler,
         device=dev,
         output_dir=out_dir,
+        criterion=criterion,
         amp_enabled=args.amp,
         freeze_bn=args.freeze_bn,
     )

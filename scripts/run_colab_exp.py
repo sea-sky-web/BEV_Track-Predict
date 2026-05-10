@@ -124,6 +124,12 @@ def build_experiment_config(
 
     fusion_mode = str(cfg.get("fusion_mode") or _flag_value(train_command, "--fusion_mode", "concat"))
 
+    loss_type = str(cfg.get("loss_type") or _flag_value(train_command, "--loss_type", "mse"))
+    pos_weight = cfg.get("pos_weight") or _flag_value(train_command, "--pos_weight", "1.0")
+    neg_weight = cfg.get("neg_weight") or _flag_value(train_command, "--neg_weight", "1.0")
+    focal_alpha = cfg.get("focal_alpha") or _flag_value(train_command, "--focal_alpha", "2.0")
+    focal_beta = cfg.get("focal_beta") or _flag_value(train_command, "--focal_beta", "4.0")
+
     return {
         "dataset": "WildTrack",
         "data_root": str(cfg.get("data_root") or _flag_value(train_command, "--data_root", "wildtrack")),
@@ -132,6 +138,11 @@ def build_experiment_config(
         "epochs": epochs,
         "batch_size": batch_size,
         "fusion_mode": fusion_mode,
+        "loss_type": loss_type,
+        "pos_weight": pos_weight,
+        "neg_weight": neg_weight,
+        "focal_alpha": focal_alpha,
+        "focal_beta": focal_beta,
         "train_command": train_command,
         "checkpoint_path": resolve_checkpoint_path(cfg, train_command, train_log),
         "metrics_sources": ["actual_metrics.json", "eval_metrics.json", "metrics_raw.json"],

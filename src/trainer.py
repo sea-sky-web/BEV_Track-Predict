@@ -44,6 +44,7 @@ class MVDetTrainer:
         scheduler: torch.optim.lr_scheduler.LRScheduler,
         device: torch.device,
         output_dir: Path,
+        criterion: nn.Module = None,
         amp_enabled: bool = False,
         freeze_bn: bool = False,
     ):
@@ -55,7 +56,8 @@ class MVDetTrainer:
             optimizer: 优化器
             scheduler: 学习率调度器
             device: 计算设备
-            output_dir: 输出目录（保存检查点、日志等）
+            output_dir: 输出目录
+            criterion: 损失函数，默认为 GaussianMSE
             amp_enabled: 是否启用自动混合精度
             freeze_bn: 是否冻结 BatchNorm 层
         """
@@ -67,7 +69,7 @@ class MVDetTrainer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # 损失函数
-        self.criterion = GaussianMSE()
+        self.criterion = criterion if criterion is not None else GaussianMSE()
         
         # AMP 梯度缩放器
         self.scaler = torch.amp.GradScaler(
