@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from loss import GaussianMSE
+from loss import create_loss_criterion
 from utils import save_heat_png
 
 
@@ -46,6 +46,10 @@ class MVDetTrainer:
         output_dir: Path,
         amp_enabled: bool = False,
         freeze_bn: bool = False,
+        bev_pos_weight: float = 1.0,
+        bev_neg_weight: float = 1.0,
+        img_pos_weight: float = 1.0,
+        img_neg_weight: float = 1.0,
     ):
         """
         初始化训练器
@@ -58,7 +62,20 @@ class MVDetTrainer:
             output_dir: 输出目录（保存检查点、日志等）
             amp_enabled: 是否启用自动混合精度
             freeze_bn: 是否冻结 BatchNorm 层
+            bev_pos_weight: BEV 热图正样本损失权重
+            bev_neg_weight: BEV 热图负样本损失权重
+            img_pos_weight: 图像热图正样本损失权重
+            img_neg_weight: 图像热图负样本损失权重
         """
+        for name, value in {
+            "bev_pos_weight": bev_pos_weight,
+            "bev_neg_weight": bev_neg_weight,
+            "img_pos_weight": img_pos_weight,
+            "img_neg_weight": img_neg_weight,
+        }.items():
+            if value <= 0.0:
+                raise ValueError(f"{name} must be > 0, got {value}")
+
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -66,8 +83,18 @@ class MVDetTrainer:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # 损失函数
-        self.criterion = GaussianMSE()
+        # 损失函数：默认权重 1.0 保持原 GaussianMSE 行为。
+        self.bev_criterion = create_loss_criterion(
+            weighted=(bev_pos_weight != 1.0 or bev_neg_weight != 1.0),
+            pos_weight=bev_pos_weight,
+            neg_weight=bev_neg_weight,
+        )
+        self.img_criterion = create_loss_criterion(
+            weighted=(img_pos_weight != 1.0 or img_neg_weight != 1.0),
+            pos_weight=img_pos_weight,
+            neg_weight=img_neg_weight,
+        )
+        self.criterion = self.bev_criterion
         
         # AMP 梯度缩放器
         self.scaler = torch.amp.GradScaler(
@@ -143,12 +170,12 @@ class MVDetTrainer:
                 imgs_res = torch.sigmoid(imgs_logits)
                 
                 # BEV 损失
-                bev_loss = self.criterion(map_res, map_gt, map_kernel)
+                bev_loss = self.bev_criterion(map_res, map_gt, map_kernel)
                 
                 # 图像损失（逐视角求和）
                 per_view_loss = 0.0
                 for vi in range(imgs_res.shape[1]):
-                    per_view_loss = per_view_loss + self.criterion(
+                    per_view_loss = per_view_loss + self.img_criterion(
                         imgs_res[:, vi],
                         imgs_gt[:, vi],
                         img_kernel
@@ -285,11 +312,11 @@ class MVDetTrainer:
                 map_res = torch.sigmoid(map_logits)
                 imgs_res = torch.sigmoid(imgs_logits)
                 
-                bev_loss = self.criterion(map_res, map_gt, map_kernel)
+                bev_loss = self.bev_criterion(map_res, map_gt, map_kernel)
                 
                 per_view_loss = 0.0
                 for vi in range(imgs_res.shape[1]):
-                    per_view_loss = per_view_loss + self.criterion(
+                    per_view_loss = per_view_loss + self.img_criterion(
                         imgs_res[:, vi],
                         imgs_gt[:, vi],
                         img_kernel

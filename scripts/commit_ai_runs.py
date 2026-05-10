@@ -93,6 +93,7 @@ def build_ai_context(
     checkpoint_path = exp_cfg.get("checkpoint_path", current_metrics.get("checkpoint_path", "Unavailable"))
     train_command = exp_cfg.get("train_command", cfg.get("train_command", []))
     train_command_text = " ".join(str(x) for x in train_command) if isinstance(train_command, list) else str(train_command)
+    loss_config = exp_cfg.get("loss_config") if isinstance(exp_cfg.get("loss_config"), dict) else {}
 
     current_f1 = _metric(current_metrics, "det_f1")
     current_precision = _metric(current_metrics, "det_precision")
@@ -156,16 +157,18 @@ Main failure: {_fmt(_metric(previous_metrics, 'main_failure')) if previous_metri
 
 ## 5. Improvement Hypothesis
 
-Because confidence fusion produced many false positives,
-we add an optional BEV point-extraction distance suppression setting,
-expecting precision and F1 to improve because nearby duplicate peaks are less likely to count as separate detections.
+Because confidence fusion still produces too many false positives and point-extraction distance suppression did not improve F1,
+we add optional BEV/image Gaussian MSE loss weights,
+expecting precision and F1 to improve because background heatmap activations can be penalized more directly during training.
 
 ## 6. Changes Made
 
 Changed files:
-- src/evaluate_main.py: adds det_min_distance and logs point-extraction settings.
-- scripts/commit_ai_runs.py: records point-extraction settings in ai_context.md.
-- docs/experiment_protocol.md: marks point-extraction parameters as comparison-critical.
+- src/train_main.py: adds switchable heatmap loss weight arguments.
+- src/trainer.py: uses weighted Gaussian MSE only when loss weights differ from 1.0.
+- scripts/run_colab_exp.py: passes loss weight overrides from Colab config or environment and records them in metrics.json.
+- scripts/commit_ai_runs.py: records loss weights in ai_context.md.
+- docs/experiment_protocol.md: marks training loss weights as comparison-critical.
 
 ## 7. Training Configuration
 
@@ -179,6 +182,10 @@ device: Unavailable
 seed: Unavailable
 checkpoint_path: {_fmt(checkpoint_path)}
 fusion_mode: {_fmt(fusion_mode)}
+bev_pos_weight: {_fmt(loss_config.get('bev_pos_weight', 'Unavailable'))}
+bev_neg_weight: {_fmt(loss_config.get('bev_neg_weight', 'Unavailable'))}
+img_pos_weight: {_fmt(loss_config.get('img_pos_weight', 'Unavailable'))}
+img_neg_weight: {_fmt(loss_config.get('img_neg_weight', 'Unavailable'))}
 train_command: {train_command_text}
 
 ## 8. Evaluation Configuration
@@ -207,13 +214,13 @@ Status: {status}
 ## 11. Next Iteration Recommendation
 
 Next action:
-Compare confidence fusion with det_min_distance enabled against the previous confidence run under the same WildTrack views and evaluation sweep.
+Compare confidence fusion with BEV negative loss weighting against the previous confidence runs under the same WildTrack views and evaluation sweep.
 
 Reason:
-The latest confidence run gained recall but produced too many false positives; distance suppression directly targets duplicate nearby peaks.
+The latest distance-suppressed run increased false positives, so the next controlled lever is training-time suppression of background heatmap activations.
 
 Expected validation:
-A new ai_runs timestamp whose metrics.json reports lower false positives and higher F1 than ai_runs/20260510_050623.
+A new ai_runs timestamp whose metrics.json reports lower false positives and higher F1 than the prior confidence runs without distance suppression.
 
 ## 12. Do Not Do Next
 
