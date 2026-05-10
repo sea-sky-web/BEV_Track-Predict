@@ -124,6 +124,16 @@ def build_ai_context(
         "Missed detections: Unavailable"
     )
     current_block = format_metric_block(current_metrics)
+    extraction_config = current_metrics.get("extraction_config")
+    if not isinstance(extraction_config, dict):
+        extraction_config = actual.get("extraction_config") if isinstance(actual.get("extraction_config"), dict) else {}
+
+    def _extract_cfg(key: str, default: Any = "Unavailable") -> Any:
+        if key in extraction_config:
+            return extraction_config[key]
+        if key in current_metrics:
+            return current_metrics[key]
+        return actual.get(key, default)
 
     return f"""# AI Iteration Context
 
@@ -146,16 +156,16 @@ Main failure: {_fmt(_metric(previous_metrics, 'main_failure')) if previous_metri
 
 ## 5. Improvement Hypothesis
 
-Because the current run needs a controlled comparison before any model-level claim,
-we preserve the training entrypoint and record the comparison-critical settings,
-expecting the next iteration to compare metrics under the same dataset, views, max_frames, checkpoint rule, threshold sweep, and fusion_mode.
+Because confidence fusion produced many false positives,
+we add an optional BEV point-extraction distance suppression setting,
+expecting precision and F1 to improve because nearby duplicate peaks are less likely to count as separate detections.
 
 ## 6. Changes Made
 
 Changed files:
-- scripts/run_colab_exp.py: records dataset, views, max_frames, fusion_mode, actual checkpoint_path, and train_command in metrics.json.
-- scripts/commit_ai_runs.py: separates previous-run metrics from current-run metrics in ai_context.md.
-- docs/iteration_records/ITERATION_002.md: records the diagnostic decision and change boundary.
+- src/evaluate_main.py: adds det_min_distance and logs point-extraction settings.
+- scripts/commit_ai_runs.py: records point-extraction settings in ai_context.md.
+- docs/experiment_protocol.md: marks point-extraction parameters as comparison-critical.
 
 ## 7. Training Configuration
 
@@ -176,7 +186,11 @@ train_command: {train_command_text}
 model_path: {_fmt(checkpoint_path)}
 views: {_fmt(views)}
 threshold: {_fmt(_metric(current_metrics, 'det_best_threshold'))}
-distance_threshold: Unavailable
+distance_threshold: {_fmt(_extract_cfg('det_dist_thr'))}
+min_distance: {_fmt(_extract_cfg('det_min_distance'))}
+nms_ksize: {_fmt(_extract_cfg('det_nms_ksize'))}
+max_preds: {_fmt(_extract_cfg('det_max_preds'))}
+thresholds: {_fmt(_extract_cfg('det_thresholds'))}
 metrics_output: metrics.json
 device: Unavailable
 max_frames: {_fmt(max_frames)}
@@ -193,13 +207,13 @@ Status: {status}
 ## 11. Next Iteration Recommendation
 
 Next action:
-Run the next Colab training/evaluation after this logging change and verify that metrics.json contains dataset, views, max_frames, fusion_mode, checkpoint_path, and detection metrics.
+Compare confidence fusion with det_min_distance enabled against the previous confidence run under the same WildTrack views and evaluation sweep.
 
 Reason:
-Without these fields, future model changes cannot be compared safely under the experiment protocol.
+The latest confidence run gained recall but produced too many false positives; distance suppression directly targets duplicate nearby peaks.
 
 Expected validation:
-A new ai_runs timestamp whose metrics.json has both detection metrics and comparison-critical configuration fields.
+A new ai_runs timestamp whose metrics.json reports lower false positives and higher F1 than ai_runs/20260510_050623.
 
 ## 12. Do Not Do Next
 

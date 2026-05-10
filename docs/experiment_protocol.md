@@ -35,7 +35,9 @@ False positives
 Missed detections
 ```
 
-Metric comparisons are valid only when dataset, views, thresholds, and distance threshold are held consistent.
+Metric comparisons are valid only when dataset, views, thresholds, distance threshold, and BEV point-extraction settings are held consistent.
+
+Comparison-critical point-extraction settings include NMS kernel size, minimum peak distance suppression, and maximum predictions per frame.
 
 ---
 
@@ -55,6 +57,7 @@ python src/evaluate_main.py \
   --views 0,1,2 \
   --model_path outputs/model_final.pth \
   --report_detection \
+  --det_min_distance 3.0 \
   --metrics_out outputs/eval_metrics.json
 ```
 
