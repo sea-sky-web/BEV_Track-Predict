@@ -93,6 +93,7 @@ def build_ai_context(
     checkpoint_path = exp_cfg.get("checkpoint_path", current_metrics.get("checkpoint_path", "Unavailable"))
     train_command = exp_cfg.get("train_command", cfg.get("train_command", []))
     train_command_text = " ".join(str(x) for x in train_command) if isinstance(train_command, list) else str(train_command)
+    alpha = exp_cfg.get("alpha", current_metrics.get("alpha", "Unavailable"))
     loss_config = exp_cfg.get("loss_config") if isinstance(exp_cfg.get("loss_config"), dict) else {}
 
     current_f1 = _metric(current_metrics, "det_f1")
@@ -157,18 +158,16 @@ Main failure: {_fmt(_metric(previous_metrics, 'main_failure')) if previous_metri
 
 ## 5. Improvement Hypothesis
 
-Because confidence fusion still produces too many false positives and point-extraction distance suppression did not improve F1,
-we add optional BEV/image Gaussian MSE loss weights,
-expecting precision and F1 to improve because background heatmap activations can be penalized more directly during training.
+Because the current training logic follows the MVDet pattern of BEV heatmap supervision plus per-view auxiliary image heatmap supervision,
+we expose and record the auxiliary loss alpha for Colab experiments,
+expecting stronger pre-BEV per-view supervision to reduce feature information loss before projection and improve F1.
 
 ## 6. Changes Made
 
 Changed files:
-- src/train_main.py: adds switchable heatmap loss weight arguments.
-- src/trainer.py: uses weighted Gaussian MSE only when loss weights differ from 1.0.
-- scripts/run_colab_exp.py: passes loss weight overrides from Colab config or environment and records them in metrics.json.
-- scripts/commit_ai_runs.py: records loss weights in ai_context.md.
-- docs/experiment_protocol.md: marks training loss weights as comparison-critical.
+- scripts/run_colab_exp.py: passes ALPHA from Colab config or environment and records it in metrics.json.
+- scripts/commit_ai_runs.py: records auxiliary supervision alpha in ai_context.md.
+- docs/experiment_protocol.md: marks auxiliary loss alpha as comparison-critical.
 
 ## 7. Training Configuration
 
@@ -182,6 +181,7 @@ device: Unavailable
 seed: Unavailable
 checkpoint_path: {_fmt(checkpoint_path)}
 fusion_mode: {_fmt(fusion_mode)}
+alpha: {_fmt(alpha)}
 bev_pos_weight: {_fmt(loss_config.get('bev_pos_weight', 'Unavailable'))}
 bev_neg_weight: {_fmt(loss_config.get('bev_neg_weight', 'Unavailable'))}
 img_pos_weight: {_fmt(loss_config.get('img_pos_weight', 'Unavailable'))}
@@ -214,13 +214,13 @@ Status: {status}
 ## 11. Next Iteration Recommendation
 
 Next action:
-Compare confidence fusion with BEV negative loss weighting against the previous confidence runs under the same WildTrack views and evaluation sweep.
+Run confidence fusion with a stronger auxiliary supervision setting, for example ALPHA=2.0, under the same WildTrack views and evaluation sweep.
 
 Reason:
-The latest distance-suppressed run increased false positives, so the next controlled lever is training-time suppression of background heatmap activations.
+Official MVDet balances BEV map loss with averaged per-view image loss through alpha, and the image auxiliary branch is intended to preserve useful per-view detection signal before BEV projection.
 
 Expected validation:
-A new ai_runs timestamp whose metrics.json reports lower false positives and higher F1 than the prior confidence runs without distance suppression.
+A new ai_runs timestamp whose metrics.json reports alpha=2.0 and improves F1 over the previous confidence-fusion runs under the same evaluation settings.
 
 ## 12. Do Not Do Next
 
