@@ -1,0 +1,65 @@
+{
+  "exp_name": "wildtrack_baseline",
+  "success": true,
+  "return_code": 0,
+  "duration_seconds": 641.056,
+  "target_metric": "moda",
+  "target_value": 0.75,
+  "experiment_config": {
+    "dataset": "WildTrack",
+    "data_root": "/content/BEV_Track-Predict/wildtrack",
+    "views": "0,1,2",
+    "max_frames": null,
+    "epochs": 10,
+    "batch_size": 2,
+    "fusion_mode": "concat",
+    "train_command": [
+      "python",
+      "scripts/train_main.py",
+      "--data_root",
+      "/content/BEV_Track-Predict/wildtrack",
+      "--epochs",
+      "10",
+      "--batch",
+      "2"
+    ],
+    "checkpoint_path": "/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth",
+    "metrics_sources": [
+      "actual_metrics.json",
+      "eval_metrics.json",
+      "metrics_raw.json"
+    ]
+  },
+  "dataset": "WildTrack",
+  "views": "0,1,2",
+  "max_frames": null,
+  "fusion_mode": "concat",
+  "checkpoint_path": "/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth",
+  "actual_metrics": {
+    "loss": 0.012769470652565361,
+    "bev_loss": 0.010876167311022679,
+    "img_loss": 0.0018933034176006913,
+    "pos_mse": 0.886512013276418,
+    "aux_pos_mse": 0.9983684786160787,
+    "model_size_mb": 114.61024570465088,
+    "total_params": 29873091.0,
+    "trainable_params": 29873091.0,
+    "det_best_threshold": 0.1,
+    "det_tp": 896.0,
+    "det_fp": 7881.0,
+    "det_fn": 6637.0,
+    "det_precision": 0.10208499487296342,
+    "det_recall": 0.11894331607593256,
+    "det_f1": 0.10987124463519314,
+    "det_loc_err_px": 1.8985390672460198,
+    "det_loc_err_m": 0.189853906724602
+  },
+  "log_path": "/content/BEV_Track-Predict/runs/wildtrack_baseline/train.log",
+  "error_path": "/content/BEV_Track-Predict/runs/wildtrack_baseline/error.log",
+  "timestamp": "20260510_030006",
+  "git_commit": "4c90b8a422c1ae313984a525f01cf6b272d73b22",
+  "ai_feedback": {
+    "status": "need_analysis",
+    "instruction": "请读取 ai_runs/latest 中的文件，分析训练结果并给出下一步修改。"
+  }
+}
