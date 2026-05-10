@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import time
@@ -121,6 +122,8 @@ def build_experiment_config(
     if batch_size is None:
         batch_size = _int_flag_value(train_command, "--batch", None)
 
+    fusion_mode = str(cfg.get("fusion_mode") or _flag_value(train_command, "--fusion_mode", "concat"))
+
     return {
         "dataset": "WildTrack",
         "data_root": str(cfg.get("data_root") or _flag_value(train_command, "--data_root", "wildtrack")),
@@ -128,7 +131,7 @@ def build_experiment_config(
         "max_frames": max_frames,
         "epochs": epochs,
         "batch_size": batch_size,
-        "fusion_mode": str(cfg.get("fusion_mode", "concat")),
+        "fusion_mode": fusion_mode,
         "train_command": train_command,
         "checkpoint_path": resolve_checkpoint_path(cfg, train_command, train_log),
         "metrics_sources": ["actual_metrics.json", "eval_metrics.json", "metrics_raw.json"],
@@ -147,6 +150,9 @@ def main() -> int:
     exp_name = str(cfg.get("exp_name", "colab_exp"))
     output_dir = Path(str(cfg.get("output_dir", ROOT / "runs" / exp_name)))
     train_command = [str(x) for x in cfg.get("train_command", ["python", "scripts/train_main.py"])]
+    fusion_mode = str(os.environ.get("FUSION_MODE") or cfg.get("fusion_mode", "concat")).strip().lower()
+    if "--fusion_mode" not in train_command:
+        train_command.extend(["--fusion_mode", fusion_mode])
     target_metric = cfg.get("target_metric", "")
     target_value = cfg.get("target_value", None)
 
