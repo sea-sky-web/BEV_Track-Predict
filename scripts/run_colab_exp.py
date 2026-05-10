@@ -73,6 +73,36 @@ def _int_flag_value(command: list[str], flag: str, default: Any = None) -> Any:
         return default
 
 
+def _float_flag_value(command: list[str], flag: str, default: Any = None) -> Any:
+    value = _flag_value(command, flag, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _append_float_override(
+    command: list[str],
+    cfg: dict[str, Any],
+    *,
+    flag: str,
+    cfg_key: str,
+    env_key: str,
+) -> None:
+    if flag in command:
+        return
+    raw = os.environ.get(env_key)
+    if raw is None:
+        raw = cfg.get(cfg_key)
+    if raw is None:
+        return
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{env_key} / {cfg_key} must be a float, got {raw!r}") from exc
+    command.extend([flag, str(value)])
+
+
 def _repo_path(raw: Union[str, Path]) -> Path:
     path = Path(raw)
     if path.is_absolute():
@@ -123,6 +153,12 @@ def build_experiment_config(
         batch_size = _int_flag_value(train_command, "--batch", None)
 
     fusion_mode = str(cfg.get("fusion_mode") or _flag_value(train_command, "--fusion_mode", "concat"))
+    loss_config = {
+        "bev_pos_weight": _float_flag_value(train_command, "--bev_pos_weight", 1.0),
+        "bev_neg_weight": _float_flag_value(train_command, "--bev_neg_weight", 1.0),
+        "img_pos_weight": _float_flag_value(train_command, "--img_pos_weight", 1.0),
+        "img_neg_weight": _float_flag_value(train_command, "--img_neg_weight", 1.0),
+    }
 
     return {
         "dataset": "WildTrack",
@@ -132,6 +168,7 @@ def build_experiment_config(
         "epochs": epochs,
         "batch_size": batch_size,
         "fusion_mode": fusion_mode,
+        "loss_config": loss_config,
         "train_command": train_command,
         "checkpoint_path": resolve_checkpoint_path(cfg, train_command, train_log),
         "metrics_sources": ["actual_metrics.json", "eval_metrics.json", "metrics_raw.json"],
@@ -153,6 +190,22 @@ def main() -> int:
     fusion_mode = str(os.environ.get("FUSION_MODE") or cfg.get("fusion_mode", "concat")).strip().lower()
     if "--fusion_mode" not in train_command:
         train_command.extend(["--fusion_mode", fusion_mode])
+    _append_float_override(
+        train_command, cfg,
+        flag="--bev_pos_weight", cfg_key="bev_pos_weight", env_key="BEV_POS_WEIGHT",
+    )
+    _append_float_override(
+        train_command, cfg,
+        flag="--bev_neg_weight", cfg_key="bev_neg_weight", env_key="BEV_NEG_WEIGHT",
+    )
+    _append_float_override(
+        train_command, cfg,
+        flag="--img_pos_weight", cfg_key="img_pos_weight", env_key="IMG_POS_WEIGHT",
+    )
+    _append_float_override(
+        train_command, cfg,
+        flag="--img_neg_weight", cfg_key="img_neg_weight", env_key="IMG_NEG_WEIGHT",
+    )
     target_metric = cfg.get("target_metric", "")
     target_value = cfg.get("target_value", None)
 

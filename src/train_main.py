@@ -76,6 +76,14 @@ def parse_args():
                     help="人体高度（米）")
     ap.add_argument("--alpha", type=float, default=DEFAULT_ALPHA,
                     help="图像损失权重")
+    ap.add_argument("--bev_pos_weight", type=float, default=1.0,
+                    help="BEV 热图正样本 Gaussian MSE 权重")
+    ap.add_argument("--bev_neg_weight", type=float, default=1.0,
+                    help="BEV 热图负样本 Gaussian MSE 权重")
+    ap.add_argument("--img_pos_weight", type=float, default=1.0,
+                    help="图像热图正样本 Gaussian MSE 权重")
+    ap.add_argument("--img_neg_weight", type=float, default=1.0,
+                    help="图像热图负样本 Gaussian MSE 权重")
     ap.add_argument("--map_ksize", type=int, default=DEFAULT_MAP_KSIZE,
                     help="BEV 热图高斯核大小")
     ap.add_argument("--map_sigma", type=float, default=DEFAULT_MAP_SIGMA,
@@ -283,6 +291,17 @@ def main():
         output_dir=out_dir,
         amp_enabled=args.amp,
         freeze_bn=args.freeze_bn,
+        bev_pos_weight=args.bev_pos_weight,
+        bev_neg_weight=args.bev_neg_weight,
+        img_pos_weight=args.img_pos_weight,
+        img_neg_weight=args.img_neg_weight,
+    )
+    print(
+        "[LOSS] "
+        f"bev_pos_weight={args.bev_pos_weight} "
+        f"bev_neg_weight={args.bev_neg_weight} "
+        f"img_pos_weight={args.img_pos_weight} "
+        f"img_neg_weight={args.img_neg_weight}"
     )
     
     # 构建高斯核
