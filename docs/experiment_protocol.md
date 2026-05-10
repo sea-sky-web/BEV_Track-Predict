@@ -35,11 +35,11 @@ False positives
 Missed detections
 ```
 
-Metric comparisons are valid only when dataset, views, thresholds, distance threshold, training loss weights, and BEV point-extraction settings are held consistent.
+Metric comparisons are valid only when dataset, views, thresholds, distance threshold, auxiliary loss alpha, training loss weights, and BEV point-extraction settings are held consistent.
 
 Comparison-critical point-extraction settings include NMS kernel size, minimum peak distance suppression, and maximum predictions per frame.
 
-Comparison-critical training settings include BEV/image positive and negative Gaussian MSE loss weights.
+Comparison-critical training settings include auxiliary loss alpha and BEV/image positive and negative Gaussian MSE loss weights.
 
 ---
 
@@ -68,6 +68,12 @@ When testing false-positive suppression from the training loss, keep all other s
 
 ```bash
 BEV_NEG_WEIGHT=2.0 FUSION_MODE=confidence python scripts/run_colab_exp.py
+```
+
+When testing stronger MVDet-style per-view auxiliary supervision, keep all other settings fixed and pass alpha explicitly, for example:
+
+```bash
+ALPHA=2.0 FUSION_MODE=confidence python scripts/run_colab_exp.py
 ```
 
 ---

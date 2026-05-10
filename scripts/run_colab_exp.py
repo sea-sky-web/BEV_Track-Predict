@@ -153,6 +153,12 @@ def build_experiment_config(
         batch_size = _int_flag_value(train_command, "--batch", None)
 
     fusion_mode = str(cfg.get("fusion_mode") or _flag_value(train_command, "--fusion_mode", "concat"))
+    alpha = _float_flag_value(train_command, "--alpha", None)
+    if alpha is None:
+        try:
+            alpha = float(cfg.get("alpha", 1.0))
+        except (TypeError, ValueError):
+            alpha = 1.0
     loss_config = {
         "bev_pos_weight": _float_flag_value(train_command, "--bev_pos_weight", 1.0),
         "bev_neg_weight": _float_flag_value(train_command, "--bev_neg_weight", 1.0),
@@ -168,6 +174,7 @@ def build_experiment_config(
         "epochs": epochs,
         "batch_size": batch_size,
         "fusion_mode": fusion_mode,
+        "alpha": alpha,
         "loss_config": loss_config,
         "train_command": train_command,
         "checkpoint_path": resolve_checkpoint_path(cfg, train_command, train_log),
@@ -190,6 +197,10 @@ def main() -> int:
     fusion_mode = str(os.environ.get("FUSION_MODE") or cfg.get("fusion_mode", "concat")).strip().lower()
     if "--fusion_mode" not in train_command:
         train_command.extend(["--fusion_mode", fusion_mode])
+    _append_float_override(
+        train_command, cfg,
+        flag="--alpha", cfg_key="alpha", env_key="ALPHA",
+    )
     _append_float_override(
         train_command, cfg,
         flag="--bev_pos_weight", cfg_key="bev_pos_weight", env_key="BEV_POS_WEIGHT",
@@ -254,6 +265,7 @@ def main() -> int:
         "views": experiment_config["views"],
         "max_frames": experiment_config["max_frames"],
         "fusion_mode": experiment_config["fusion_mode"],
+        "alpha": experiment_config["alpha"],
         "checkpoint_path": experiment_config["checkpoint_path"],
         "actual_metrics": actual_metrics,
         "log_path": str(train_log),
