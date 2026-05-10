@@ -6,16 +6,16 @@
 
 ## 2. Previous Iteration
 
-ai_runs/20260509_073835/
+No previous formal iteration.
 
 ## 3. Previous Metrics Summary
 
-Precision: 0.101749
-Recall: 0.139785
-F1: 0.117772
-Localization error: 0.194038
-False positives: 9296
-Missed detections: 6480
+Precision: Unavailable
+Recall: Unavailable
+F1: Unavailable
+Localization error: Unavailable
+False positives: Unavailable
+Missed detections: Unavailable
 Main failure: Unavailable
 
 ## 4. Observed Problem
