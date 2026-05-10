@@ -1,0 +1,67 @@
+{
+  "exp_name": "wildtrack_baseline",
+  "success": true,
+  "return_code": 0,
+  "duration_seconds": 620.187,
+  "target_metric": "moda",
+  "target_value": 0.75,
+  "experiment_config": {
+    "dataset": "WildTrack",
+    "data_root": "/content/BEV_Track-Predict/wildtrack",
+    "views": "0,1,2",
+    "max_frames": null,
+    "epochs": 10,
+    "batch_size": 2,
+    "fusion_mode": "confidence",
+    "train_command": [
+      "python",
+      "scripts/train_main.py",
+      "--data_root",
+      "/content/BEV_Track-Predict/wildtrack",
+      "--epochs",
+      "10",
+      "--batch",
+      "2",
+      "--fusion_mode",
+      "confidence"
+    ],
+    "checkpoint_path": "/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth",
+    "metrics_sources": [
+      "actual_metrics.json",
+      "eval_metrics.json",
+      "metrics_raw.json"
+    ]
+  },
+  "dataset": "WildTrack",
+  "views": "0,1,2",
+  "max_frames": null,
+  "fusion_mode": "confidence",
+  "checkpoint_path": "/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth",
+  "actual_metrics": {
+    "loss": 0.012546631476531426,
+    "bev_loss": 0.010656092294181387,
+    "img_loss": 0.0018905392157224318,
+    "pos_mse": 0.8725916051864624,
+    "aux_pos_mse": 0.9983676060040791,
+    "model_size_mb": 105.73726749420166,
+    "total_params": 27546692.0,
+    "trainable_params": 27546692.0,
+    "det_best_threshold": 0.15,
+    "det_tp": 660.0,
+    "det_fp": 3952.0,
+    "det_fn": 6873.0,
+    "det_precision": 0.14310494362532525,
+    "det_recall": 0.08761449621664676,
+    "det_f1": 0.10868670234664471,
+    "det_loc_err_px": 1.8904483287623435,
+    "det_loc_err_m": 0.18904483287623436
+  },
+  "log_path": "/content/BEV_Track-Predict/runs/wildtrack_baseline/train.log",
+  "error_path": "/content/BEV_Track-Predict/runs/wildtrack_baseline/error.log",
+  "timestamp": "20260510_052426",
+  "git_commit": "7b5b5929bc2afccb806e9abc28f6242738b1a5bf",
+  "ai_feedback": {
+    "status": "need_analysis",
+    "instruction": "请读取 ai_runs/latest 中的文件，分析训练结果并给出下一步修改。"
+  }
+}
