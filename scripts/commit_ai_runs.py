@@ -125,6 +125,8 @@ def build_ai_context(
     )
     current_block = format_metric_block(current_metrics)
 
+    ext_cfg = current_metrics.get("extraction_config") if isinstance(current_metrics.get("extraction_config"), dict) else {}
+
     return f"""# AI Iteration Context
 
 ## 1. Iteration ID
@@ -153,9 +155,9 @@ expecting the next iteration to compare metrics under the same dataset, views, m
 ## 6. Changes Made
 
 Changed files:
-- scripts/run_colab_exp.py: records dataset, views, max_frames, fusion_mode, actual checkpoint_path, and train_command in metrics.json.
-- scripts/commit_ai_runs.py: separates previous-run metrics from current-run metrics in ai_context.md.
-- docs/iteration_records/ITERATION_002.md: records the diagnostic decision and change boundary.
+- src/evaluate_main.py: added --det_min_distance and implemented greedy distance suppression to reduce false positives.
+- scripts/commit_ai_runs.py: included detection extraction configuration in ai_context.md for traceability.
+- docs/experiment_protocol.md: documented that point-extraction parameters are comparison-critical.
 
 ## 7. Training Configuration
 
@@ -176,7 +178,11 @@ train_command: {train_command_text}
 model_path: {_fmt(checkpoint_path)}
 views: {_fmt(views)}
 threshold: {_fmt(_metric(current_metrics, 'det_best_threshold'))}
-distance_threshold: Unavailable
+distance_threshold: {_fmt(ext_cfg.get('det_dist_thr', 'Unavailable'))}
+min_distance: {_fmt(ext_cfg.get('det_min_distance', 'Unavailable'))}
+nms_ksize: {_fmt(ext_cfg.get('det_nms_ksize', 'Unavailable'))}
+max_preds: {_fmt(ext_cfg.get('det_max_preds', 'Unavailable'))}
+thresholds: {_fmt(ext_cfg.get('det_thresholds', 'Unavailable'))}
 metrics_output: metrics.json
 device: Unavailable
 max_frames: {_fmt(max_frames)}

@@ -215,19 +215,19 @@ add unrelated modules because they seem advanced
 The immediate next action is:
 
 ```text
-Complete Stage 0 repository control file alignment.
+Evaluate the confidence fusion checkpoint with greedy distance suppression.
 ```
 
 Reason:
 
 ```text
-The AI control files must be correctly placed and referenced before model implementation continues.
+Confidence fusion showed high false positives (12252 vs 7881 concat). Reducing FPs via --det_min_distance 3.0 is needed to recover precision and F1 before further model optimization.
 ```
 
 Expected validation:
 
 ```text
-A repository tree showing AGENTS.md and all required docs files in their expected paths.
+A new ai_runs timestamp in Colab with --det_min_distance 3.0 showing reduced det_fp and improved det_f1.
 ```
 
 ---
@@ -237,10 +237,11 @@ A repository tree showing AGENTS.md and all required docs files in their expecte
 The current short-term plan is:
 
 ```text
-Stage 0: align project control files
-Stage 1: verify baseline train/eval pipeline
-Stage 2: compare naive fusion with confidence fusion
-Stage 3: decide based on metrics
+Stage 0: align project control files (Completed)
+Stage 1: verify baseline train/eval pipeline (Completed)
+Stage 2: compare naive fusion with confidence fusion (Completed - Result: high FPs)
+Stage 3: improve evaluation via distance-based suppression (In Progress)
+Stage 4: decide based on metrics
 ```
 
 This plan prevents scope drift and keeps the project focused on measurable BEV pedestrian detection progress.
