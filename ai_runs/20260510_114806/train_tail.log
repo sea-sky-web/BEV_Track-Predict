@@ -1,0 +1,133 @@
+[launcher] train_command: python scripts/train_main.py --data_root /content/BEV_Track-Predict/wildtrack --epochs 10 --batch 2 --fusion_mode confidence --bev_neg_weight 2.0
+[DEV] device=cuda, cuda_available=True
+[DEV] gpu=NVIDIA A100-SXM4-80GB
+
+[CALIB] Loading calibration...
+[CALIB] views=[0, 1, 2]
+[UNIT] step=0.025, median||t||=2004.98 => unit_scale=100.0
+
+[GRID] Building projection matrices...
+[CFG] img=720x1280, feat=270x480, bev(reduced)=360x120
+[GRID] view=0 cam=CVLab1 valid_ratio=0.1195
+[GRID] view=1 cam=CVLab2 valid_ratio=0.8914
+[GRID] view=2 cam=CVLab3 valid_ratio=0.3579
+[CFG] kept_views=[0, 1, 2]
+
+[DATA] Creating dataset...
+[DATA] len(ds)=300, len(loader)=150
+
+[MODEL] Creating model...
+[MODEL] MVDetLikeNet fusion_mode=confidence
+
+[OPT] Creating optimizer and scheduler...
+
+[TRAIN] Creating trainer...
+[LOSS] bev_pos_weight=1.0 bev_neg_weight=2.0 img_pos_weight=1.0 img_neg_weight=1.0
+
+[TRAIN] Starting training...
+
+=== Epoch 1/10 ===
+[step 0] loss=0.736923 bev=0.521000 img=0.215923 pos_mse=0.247318 aux_pos_mse=0.312001 pred_raw=[-1.693,2.706] mean=0.080 max_gt=1.000 lr=0.00400
+[step 20] loss=0.021765 bev=0.019319 img=0.002446 pos_mse=0.979597 aux_pos_mse=0.999732 pred_raw=[-8.764,-2.805] mean=-4.751 max_gt=1.000 lr=0.00452
+[step 40] loss=0.021320 bev=0.018898 img=0.002422 pos_mse=0.997261 aux_pos_mse=1.000000 pred_raw=[-19.181,-4.703] mean=-7.113 max_gt=1.000 lr=0.00596
+[step 60] loss=0.017744 bev=0.015801 img=0.001943 pos_mse=0.998443 aux_pos_mse=1.000000 pred_raw=[-19.687,-5.246] mean=-7.945 max_gt=1.000 lr=0.00831
+[step 80] loss=0.017180 bev=0.015251 img=0.001929 pos_mse=0.997647 aux_pos_mse=1.000000 pred_raw=[-33.225,-5.213] mean=-8.298 max_gt=1.000 lr=0.01150
+[step 100] loss=0.023743 bev=0.021068 img=0.002674 pos_mse=0.995251 aux_pos_mse=1.000000 pred_raw=[-30.800,-4.548] mean=-7.930 max_gt=1.000 lr=0.01550
+[step 120] loss=0.013153 bev=0.011773 img=0.001379 pos_mse=0.989727 aux_pos_mse=1.000000 pred_raw=[-31.586,-3.925] mean=-7.851 max_gt=1.000 lr=0.02020
+[step 140] loss=0.010415 bev=0.009244 img=0.001172 pos_mse=0.964983 aux_pos_mse=1.000000 pred_raw=[-45.472,-3.035] mean=-7.203 max_gt=1.000 lr=0.02552
+[Epoch 0] loss=0.038645 bev=0.030808 img=0.007837
+=== Epoch 2/10 ===
+[step 150] loss=0.019156 bev=0.016786 img=0.002369 pos_mse=0.969763 aux_pos_mse=1.000000 pred_raw=[-48.074,-3.165] mean=-7.389 max_gt=1.000 lr=0.02839
+[step 170] loss=0.015954 bev=0.014076 img=0.001878 pos_mse=0.961065 aux_pos_mse=1.000000 pred_raw=[-43.192,-2.974] mean=-6.824 max_gt=1.000 lr=0.03445
+[step 190] loss=0.013681 bev=0.011964 img=0.001716 pos_mse=0.961733 aux_pos_mse=1.000000 pred_raw=[-37.235,-2.962] mean=-6.989 max_gt=1.000 lr=0.04085
+[step 210] loss=0.015019 bev=0.013251 img=0.001768 pos_mse=0.957839 aux_pos_mse=1.000000 pred_raw=[-44.176,-2.900] mean=-7.054 max_gt=1.000 lr=0.04747
+[step 230] loss=0.016428 bev=0.014463 img=0.001964 pos_mse=0.954566 aux_pos_mse=1.000000 pred_raw=[-34.994,-2.844] mean=-6.684 max_gt=1.000 lr=0.05418
+[step 250] loss=0.014048 bev=0.012353 img=0.001695 pos_mse=0.955001 aux_pos_mse=1.000000 pred_raw=[-38.268,-2.465] mean=-6.775 max_gt=1.000 lr=0.06085
+[step 270] loss=0.016261 bev=0.014325 img=0.001936 pos_mse=0.954950 aux_pos_mse=1.000000 pred_raw=[-35.712,-2.405] mean=-6.758 max_gt=1.000 lr=0.06734
+[step 290] loss=0.020156 bev=0.017811 img=0.002345 pos_mse=0.958031 aux_pos_mse=1.000000 pred_raw=[-43.506,-2.252] mean=-6.597 max_gt=1.000 lr=0.07354
+[Epoch 1] loss=0.016146 bev=0.014261 img=0.001885
+=== Epoch 3/10 ===
+[step 300] loss=0.018070 bev=0.015747 img=0.002323 pos_mse=0.945954 aux_pos_mse=1.000000 pred_raw=[-63.295,-2.384] mean=-6.882 max_gt=1.000 lr=0.07648
+[step 320] loss=0.012594 bev=0.011080 img=0.001514 pos_mse=0.956786 aux_pos_mse=1.000000 pred_raw=[-43.442,-2.069] mean=-6.758 max_gt=1.000 lr=0.08200
+[step 340] loss=0.017117 bev=0.015099 img=0.002018 pos_mse=0.955094 aux_pos_mse=1.000000 pred_raw=[-44.460,-2.432] mean=-6.931 max_gt=1.000 lr=0.08694
+[step 360] loss=0.015267 bev=0.013415 img=0.001852 pos_mse=0.954226 aux_pos_mse=1.000000 pred_raw=[-35.776,-1.935] mean=-6.793 max_gt=1.000 lr=0.09119
+[step 380] loss=0.014631 bev=0.012755 img=0.001876 pos_mse=0.935328 aux_pos_mse=1.000000 pred_raw=[-48.540,-1.998] mean=-6.687 max_gt=1.000 lr=0.09467
+[step 400] loss=0.012252 bev=0.010776 img=0.001476 pos_mse=0.948003 aux_pos_mse=1.000000 pred_raw=[-39.796,-1.992] mean=-6.640 max_gt=1.000 lr=0.09732
+[step 420] loss=0.021387 bev=0.018857 img=0.002529 pos_mse=0.958702 aux_pos_mse=1.000000 pred_raw=[-40.151,-2.604] mean=-6.838 max_gt=1.000 lr=0.09908
+[step 440] loss=0.013982 bev=0.012467 img=0.001514 pos_mse=0.940431 aux_pos_mse=0.999998 pred_raw=[-42.663,-1.913] mean=-6.716 max_gt=1.000 lr=0.09992
+[Epoch 2] loss=0.016001 bev=0.014116 img=0.001885
+=== Epoch 4/10 ===
+[step 450] loss=0.014589 bev=0.012904 img=0.001685 pos_mse=0.949462 aux_pos_mse=0.999999 pred_raw=[-42.276,-1.891] mean=-6.675 max_gt=1.000 lr=0.10000
+[step 470] loss=0.012594 bev=0.011046 img=0.001548 pos_mse=0.942225 aux_pos_mse=0.999998 pred_raw=[-33.288,-1.684] mean=-6.347 max_gt=1.000 lr=0.09989
+[step 490] loss=0.017436 bev=0.015269 img=0.002167 pos_mse=0.938753 aux_pos_mse=0.999999 pred_raw=[-33.099,-2.191] mean=-6.668 max_gt=1.000 lr=0.09961
+[step 510] loss=0.012871 bev=0.011274 img=0.001597 pos_mse=0.924107 aux_pos_mse=0.999998 pred_raw=[-48.473,-1.550] mean=-6.507 max_gt=1.000 lr=0.09914
+[step 530] loss=0.016881 bev=0.014900 img=0.001981 pos_mse=0.931897 aux_pos_mse=0.999999 pred_raw=[-34.724,-1.302] mean=-6.312 max_gt=1.000 lr=0.09850
+[step 550] loss=0.016361 bev=0.014447 img=0.001914 pos_mse=0.932912 aux_pos_mse=0.999998 pred_raw=[-34.768,-1.443] mean=-6.497 max_gt=1.000 lr=0.09769
+[step 570] loss=0.018281 bev=0.016101 img=0.002180 pos_mse=0.940961 aux_pos_mse=0.999997 pred_raw=[-32.044,-1.763] mean=-6.314 max_gt=1.000 lr=0.09671
+[step 590] loss=0.016326 bev=0.014471 img=0.001855 pos_mse=0.937030 aux_pos_mse=0.999996 pred_raw=[-36.644,-1.192] mean=-6.342 max_gt=1.000 lr=0.09555
+[Epoch 3] loss=0.015870 bev=0.013985 img=0.001885
+=== Epoch 5/10 ===
+[step 600] loss=0.014497 bev=0.012714 img=0.001782 pos_mse=0.937116 aux_pos_mse=0.999996 pred_raw=[-42.047,-1.276] mean=-6.469 max_gt=1.000 lr=0.09492
+[step 620] loss=0.020045 bev=0.017585 img=0.002460 pos_mse=0.942069 aux_pos_mse=0.999990 pred_raw=[-30.534,-1.533] mean=-6.308 max_gt=1.000 lr=0.09352
+[step 640] loss=0.022320 bev=0.019478 img=0.002842 pos_mse=0.947692 aux_pos_mse=0.999986 pred_raw=[-29.520,-1.290] mean=-6.176 max_gt=1.000 lr=0.09197
+[step 660] loss=0.013274 bev=0.011649 img=0.001625 pos_mse=0.929980 aux_pos_mse=0.999988 pred_raw=[-31.813,-1.209] mean=-6.312 max_gt=1.000 lr=0.09027
+[step 680] loss=0.015474 bev=0.013656 img=0.001818 pos_mse=0.931244 aux_pos_mse=0.999987 pred_raw=[-28.193,-1.256] mean=-6.019 max_gt=1.000 lr=0.08843
+[step 700] loss=0.013539 bev=0.011888 img=0.001651 pos_mse=0.916507 aux_pos_mse=0.999990 pred_raw=[-29.673,-0.847] mean=-6.065 max_gt=1.000 lr=0.08645
+[step 720] loss=0.013776 bev=0.012347 img=0.001428 pos_mse=0.937566 aux_pos_mse=0.999980 pred_raw=[-34.536,-1.124] mean=-6.017 max_gt=1.000 lr=0.08434
+[step 740] loss=0.012866 bev=0.011337 img=0.001529 pos_mse=0.940371 aux_pos_mse=0.999975 pred_raw=[-28.076,-1.289] mean=-5.857 max_gt=1.000 lr=0.08210
+[Epoch 4] loss=0.015775 bev=0.013890 img=0.001885
+[CKPT] saved outputs/train_multicam_mvdet_style_v3/model_epoch4.pth
+=== Epoch 6/10 ===
+[step 750] loss=0.012885 bev=0.011280 img=0.001605 pos_mse=0.925804 aux_pos_mse=0.999948 pred_raw=[-24.133,-0.892] mean=-5.660 max_gt=1.000 lr=0.08094
+[step 770] loss=0.014473 bev=0.012765 img=0.001708 pos_mse=0.935289 aux_pos_mse=0.999914 pred_raw=[-31.779,-0.993] mean=-5.969 max_gt=1.000 lr=0.07854
+[step 790] loss=0.016019 bev=0.014064 img=0.001954 pos_mse=0.923317 aux_pos_mse=0.999912 pred_raw=[-31.055,-0.766] mean=-5.987 max_gt=1.000 lr=0.07603
+[step 810] loss=0.016389 bev=0.014524 img=0.001865 pos_mse=0.939446 aux_pos_mse=0.999925 pred_raw=[-28.161,-1.235] mean=-5.898 max_gt=1.000 lr=0.07343
+[step 830] loss=0.012575 bev=0.011269 img=0.001306 pos_mse=0.952808 aux_pos_mse=0.999920 pred_raw=[-29.833,-1.048] mean=-5.781 max_gt=1.000 lr=0.07075
+[step 850] loss=0.015905 bev=0.013935 img=0.001970 pos_mse=0.916535 aux_pos_mse=0.999874 pred_raw=[-25.388,-1.382] mean=-5.660 max_gt=1.000 lr=0.06799
+[step 870] loss=0.014974 bev=0.013080 img=0.001894 pos_mse=0.913194 aux_pos_mse=0.999927 pred_raw=[-26.190,-0.874] mean=-5.614 max_gt=1.000 lr=0.06517
+[step 890] loss=0.015023 bev=0.013259 img=0.001764 pos_mse=0.923644 aux_pos_mse=0.999853 pred_raw=[-28.116,-0.910] mean=-5.718 max_gt=1.000 lr=0.06229
+[Epoch 5] loss=0.015744 bev=0.013859 img=0.001885
+=== Epoch 7/10 ===
+[step 900] loss=0.017873 bev=0.015677 img=0.002196 pos_mse=0.927490 aux_pos_mse=0.999767 pred_raw=[-33.020,-1.060] mean=-5.616 max_gt=1.000 lr=0.06083
+[step 920] loss=0.012299 bev=0.010938 img=0.001362 pos_mse=0.931344 aux_pos_mse=0.999675 pred_raw=[-32.441,-1.173] mean=-5.583 max_gt=1.000 lr=0.05790
+[step 940] loss=0.014779 bev=0.012948 img=0.001831 pos_mse=0.900574 aux_pos_mse=0.999631 pred_raw=[-27.522,-0.712] mean=-5.579 max_gt=1.000 lr=0.05493
+[step 960] loss=0.013585 bev=0.011987 img=0.001598 pos_mse=0.932274 aux_pos_mse=0.999490 pred_raw=[-21.973,-1.355] mean=-5.542 max_gt=1.000 lr=0.05194
+[step 980] loss=0.016004 bev=0.014127 img=0.001877 pos_mse=0.929760 aux_pos_mse=0.999561 pred_raw=[-22.896,-0.932] mean=-5.549 max_gt=1.000 lr=0.04895
+[step 1000] loss=0.014747 bev=0.013008 img=0.001740 pos_mse=0.932794 aux_pos_mse=0.999643 pred_raw=[-16.985,-1.012] mean=-5.330 max_gt=1.000 lr=0.04597
+[step 1020] loss=0.015868 bev=0.014008 img=0.001860 pos_mse=0.930958 aux_pos_mse=0.999696 pred_raw=[-16.671,-1.387] mean=-5.355 max_gt=1.000 lr=0.04299
+[step 1040] loss=0.018726 bev=0.016534 img=0.002192 pos_mse=0.949801 aux_pos_mse=0.999564 pred_raw=[-19.854,-0.706] mean=-5.413 max_gt=1.000 lr=0.04004
+[Epoch 6] loss=0.015682 bev=0.013796 img=0.001886
+=== Epoch 8/10 ===
+[step 1050] loss=0.018703 bev=0.016314 img=0.002389 pos_mse=0.922376 aux_pos_mse=0.999453 pred_raw=[-21.558,-0.455] mean=-5.430 max_gt=1.000 lr=0.03858
+[step 1070] loss=0.017803 bev=0.015336 img=0.002467 pos_mse=0.918984 aux_pos_mse=0.999397 pred_raw=[-19.456,-0.740] mean=-5.429 max_gt=1.000 lr=0.03569
+[step 1090] loss=0.016698 bev=0.014500 img=0.002198 pos_mse=0.904685 aux_pos_mse=0.999377 pred_raw=[-19.967,-0.528] mean=-5.386 max_gt=1.000 lr=0.03285
+[step 1110] loss=0.012414 bev=0.011036 img=0.001378 pos_mse=0.939781 aux_pos_mse=0.999217 pred_raw=[-22.721,-0.793] mean=-5.193 max_gt=1.000 lr=0.03007
+[step 1130] loss=0.013951 bev=0.012254 img=0.001697 pos_mse=0.917977 aux_pos_mse=0.999239 pred_raw=[-26.997,-0.587] mean=-5.306 max_gt=1.000 lr=0.02737
+[step 1150] loss=0.015350 bev=0.013677 img=0.001673 pos_mse=0.940103 aux_pos_mse=0.999240 pred_raw=[-14.973,-1.195] mean=-5.203 max_gt=1.000 lr=0.02474
+[step 1170] loss=0.015850 bev=0.013899 img=0.001951 pos_mse=0.919840 aux_pos_mse=0.999305 pred_raw=[-18.919,-0.655] mean=-5.326 max_gt=1.000 lr=0.02221
+[step 1190] loss=0.015540 bev=0.013641 img=0.001899 pos_mse=0.928502 aux_pos_mse=0.999150 pred_raw=[-19.878,-0.511] mean=-5.235 max_gt=1.000 lr=0.01977
+[Epoch 7] loss=0.015609 bev=0.013721 img=0.001889
+=== Epoch 9/10 ===
+[step 1200] loss=0.012677 bev=0.011061 img=0.001616 pos_mse=0.911830 aux_pos_mse=0.999184 pred_raw=[-19.439,-0.413] mean=-5.283 max_gt=1.000 lr=0.01859
+[step 1220] loss=0.017320 bev=0.015183 img=0.002137 pos_mse=0.943955 aux_pos_mse=0.998866 pred_raw=[-17.760,-0.813] mean=-5.324 max_gt=1.000 lr=0.01632
+[step 1240] loss=0.018869 bev=0.016601 img=0.002267 pos_mse=0.923877 aux_pos_mse=0.998738 pred_raw=[-15.936,-0.560] mean=-5.183 max_gt=1.000 lr=0.01417
+[step 1260] loss=0.016458 bev=0.014550 img=0.001907 pos_mse=0.896762 aux_pos_mse=0.999140 pred_raw=[-18.291,-0.499] mean=-5.194 max_gt=1.000 lr=0.01215
+[step 1280] loss=0.015000 bev=0.013263 img=0.001737 pos_mse=0.924045 aux_pos_mse=0.999183 pred_raw=[-18.425,-0.891] mean=-5.122 max_gt=1.000 lr=0.01026
+[step 1300] loss=0.016934 bev=0.014855 img=0.002079 pos_mse=0.907357 aux_pos_mse=0.998676 pred_raw=[-16.715,-0.485] mean=-4.960 max_gt=1.000 lr=0.00852
+[step 1320] loss=0.014356 bev=0.012644 img=0.001712 pos_mse=0.906302 aux_pos_mse=0.998678 pred_raw=[-16.071,-0.394] mean=-5.149 max_gt=1.000 lr=0.00693
+[step 1340] loss=0.016838 bev=0.014944 img=0.001894 pos_mse=0.923104 aux_pos_mse=0.999061 pred_raw=[-23.172,-0.787] mean=-5.202 max_gt=1.000 lr=0.00548
+[Epoch 8] loss=0.015506 bev=0.013614 img=0.001892
+=== Epoch 10/10 ===
+[step 1350] loss=0.016230 bev=0.014332 img=0.001899 pos_mse=0.908507 aux_pos_mse=0.998914 pred_raw=[-19.393,-0.554] mean=-5.101 max_gt=1.000 lr=0.00482
+[step 1370] loss=0.013520 bev=0.011877 img=0.001644 pos_mse=0.914856 aux_pos_mse=0.998989 pred_raw=[-17.904,-0.854] mean=-5.213 max_gt=1.000 lr=0.00362
+[step 1390] loss=0.012201 bev=0.010694 img=0.001507 pos_mse=0.900254 aux_pos_mse=0.998808 pred_raw=[-20.303,-0.486] mean=-5.058 max_gt=1.000 lr=0.00259
+[step 1410] loss=0.021802 bev=0.019186 img=0.002616 pos_mse=0.925534 aux_pos_mse=0.998654 pred_raw=[-22.102,-0.663] mean=-5.212 max_gt=1.000 lr=0.00172
+[step 1430] loss=0.015576 bev=0.013897 img=0.001679 pos_mse=0.918825 aux_pos_mse=0.998991 pred_raw=[-21.565,-0.500] mean=-5.094 max_gt=1.000 lr=0.00103
+[step 1450] loss=0.014082 bev=0.012341 img=0.001740 pos_mse=0.924750 aux_pos_mse=0.998706 pred_raw=[-19.190,-0.615] mean=-5.210 max_gt=1.000 lr=0.00052
+[step 1470] loss=0.014775 bev=0.012889 img=0.001885 pos_mse=0.889033 aux_pos_mse=0.998904 pred_raw=[-15.852,-0.357] mean=-5.139 max_gt=1.000 lr=0.00018
+[step 1490] loss=0.014385 bev=0.012431 img=0.001954 pos_mse=0.885482 aux_pos_mse=0.998801 pred_raw=[-16.726,-0.562] mean=-5.106 max_gt=1.000 lr=0.00001
+[Epoch 9] loss=0.015452 bev=0.013559 img=0.001892
+[CKPT] saved outputs/train_multicam_mvdet_style_v3/model_epoch9.pth
+
+[SAVE] Saving final model...
+[OK] saved outputs/train_multicam_mvdet_style_v3/model_final.pth
