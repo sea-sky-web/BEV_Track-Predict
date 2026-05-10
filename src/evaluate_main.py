@@ -8,6 +8,7 @@ This script now supports:
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
@@ -76,6 +77,13 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--img_h", type=int, default=DEFAULT_IMG_H, help="Input image height")
     ap.add_argument("--img_w", type=int, default=DEFAULT_IMG_W, help="Input image width")
     ap.add_argument("--person_h", type=float, default=DEFAULT_PERSON_H, help="Person height (meters)")
+    ap.add_argument(
+        "--fusion_mode",
+        type=str,
+        default=os.environ.get("FUSION_MODE", "concat"),
+        choices=["concat", "confidence"],
+        help="BEV fusion mode used by the checkpoint.",
+    )
 
     ap.add_argument("--alpha", type=float, default=DEFAULT_ALPHA, help="Aux image loss weight")
     ap.add_argument("--map_ksize", type=int, default=DEFAULT_MAP_KSIZE, help="Gaussian kernel size for BEV")
@@ -487,9 +495,10 @@ def main() -> Dict[str, float]:
         pretrained=False,
         feat_ch=DEFAULT_FEAT_CH,
         add_coord=True,
+        fusion_mode=args.fusion_mode,
     )
     _load_model_weights(model, model_path, dev)
-    print(f"[MODEL] loaded weights from {model_path}")
+    print(f"[MODEL] loaded weights from {model_path} fusion_mode={args.fusion_mode}")
 
     map_kernel = build_gaussian_kernel_2d(args.map_ksize, args.map_sigma, device=dev)
     img_kernel = build_gaussian_kernel_2d(args.img_ksize, args.img_sigma, device=dev)

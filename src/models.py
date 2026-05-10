@@ -3,7 +3,7 @@
 神经网络模型模块：backbone、heads 和完整网络架构
 """
 
-from typing import Tuple
+from typing import Literal, Tuple
 
 import torch
 import torch.nn as nn
@@ -174,6 +174,36 @@ class BEVHeadDilated(nn.Module):
         return self.net(x)
 
 
+class SpatialAwareConfidenceFusion(nn.Module):
+    """Learn BEV-space per-view confidence weights and fuse projected features."""
+
+    def __init__(self, feat_ch: int, hidden_ch: int = 64):
+        super().__init__()
+        hidden_ch = max(16, min(hidden_ch, feat_ch // 4))
+        self.score_net = nn.Sequential(
+            nn.Conv2d(feat_ch, hidden_ch, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden_ch, 1, 1),
+        )
+
+    def forward(self, feats_bev: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            feats_bev: projected per-view BEV features (B, V, C, Hb, Wb)
+
+        Returns:
+            Fused BEV feature map (B, C, Hb, Wb)
+        """
+        if feats_bev.ndim != 5:
+            raise ValueError(f"Expected (B,V,C,H,W) BEV features, got {tuple(feats_bev.shape)}")
+
+        b, v, c, h, w = feats_bev.shape
+        flat = feats_bev.reshape(b * v, c, h, w)
+        scores = self.score_net(flat).reshape(b, v, 1, h, w)
+        weights = torch.softmax(scores, dim=1)
+        return (weights * feats_bev).sum(dim=1)
+
+
 class MVDetLikeNet(nn.Module):
     """
     MVDet 风格的多视角 BEV 检测网络
@@ -205,6 +235,7 @@ class MVDetLikeNet(nn.Module):
         feat_ch: int = 512,
         pretrained: bool = True,
         add_coord: bool = True,
+        fusion_mode: Literal["concat", "confidence"] = "concat",
     ):
         """
         初始化 MVDetLikeNet
@@ -217,13 +248,17 @@ class MVDetLikeNet(nn.Module):
             feat_ch: 特征通道数，默认 512
             pretrained: 是否加载预训练权重，默认 True
             add_coord: 是否添加坐标编码，默认 True
+            fusion_mode: BEV 融合模式，concat 保留 baseline，confidence 启用空间置信度融合
         """
         super().__init__()
+        if fusion_mode not in {"concat", "confidence"}:
+            raise ValueError(f"Unsupported fusion_mode: {fusion_mode}")
         
         self.V = num_views
         self.Hb, self.Wb = reduced_hw
         self.Hf, self.Wf = feat_hw
         self.add_coord = add_coord
+        self.fusion_mode = fusion_mode
         
         # 共享的特征提取主干
         self.backbone = ResNet50Stride8Trunk(pretrained=pretrained, out_ch=feat_ch)
@@ -235,7 +270,12 @@ class MVDetLikeNet(nn.Module):
         self.register_buffer("proj_mats", proj_mats.detach().clone())
         
         # 计算 BEV 融合特征的输入通道数
-        in_bev = num_views * feat_ch
+        if fusion_mode == "concat":
+            in_bev = num_views * feat_ch
+            self.confidence_fusion = None
+        else:
+            in_bev = feat_ch
+            self.confidence_fusion = SpatialAwareConfidenceFusion(feat_ch=feat_ch)
         
         # 可选的坐标编码
         if add_coord:
@@ -299,16 +339,19 @@ class MVDetLikeNet(nn.Module):
         # 堆叠单视角预测
         imgs_logits = torch.stack(imgs_logits, dim=1)  # (B, V, 2, Hf, Wf)
         
-        # 拼接多视角 BEV 特征
-        bev_cat = torch.cat(feats_bev, dim=1)  # (B, V*feat_ch, Hb, Wb)
+        if self.fusion_mode == "concat":
+            bev_fused = torch.cat(feats_bev, dim=1)  # (B, V*feat_ch, Hb, Wb)
+        else:
+            bev_stack = torch.stack(feats_bev, dim=1)  # (B, V, feat_ch, Hb, Wb)
+            bev_fused = self.confidence_fusion(bev_stack)  # (B, feat_ch, Hb, Wb)
         
         # 添加坐标编码
         if self.add_coord:
             coord = self.coord.expand(B, -1, -1, -1)
-            bev_cat = torch.cat([bev_cat, coord], dim=1)
+            bev_fused = torch.cat([bev_fused, coord], dim=1)
         
         # BEV 融合预测
-        map_logits = self.bev_head(bev_cat)  # (B, 1, Hb, Wb)
+        map_logits = self.bev_head(bev_fused)  # (B, 1, Hb, Wb)
         
         return map_logits, imgs_logits
 
@@ -322,6 +365,7 @@ def create_model(
     pretrained: bool = True,
     feat_ch: int = 512,
     add_coord: bool = True,
+    fusion_mode: Literal["concat", "confidence"] = "concat",
 ) -> MVDetLikeNet:
     """
     工厂函数：创建完整的 MVDetLikeNet 模型
@@ -335,6 +379,7 @@ def create_model(
         pretrained: 是否加载预训练权重
         feat_ch: 特征通道数
         add_coord: 是否添加坐标编码
+        fusion_mode: BEV 融合模式
         
     Returns:
         MVDetLikeNet: 初始化完成的模型
@@ -357,6 +402,7 @@ def create_model(
         feat_ch=feat_ch,
         pretrained=pretrained,
         add_coord=add_coord,
+        fusion_mode=fusion_mode,
     ).to(device)
     
     return model

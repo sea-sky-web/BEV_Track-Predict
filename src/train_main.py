@@ -4,6 +4,7 @@
 """
 
 import argparse
+import os
 from pathlib import Path
 
 import numpy as np
@@ -66,6 +67,9 @@ def parse_args():
                     help="输入图像高度")
     ap.add_argument("--img_w", type=int, default=DEFAULT_IMG_W,
                     help="输入图像宽度")
+    ap.add_argument("--fusion_mode", type=str, default=os.environ.get("FUSION_MODE", "concat"),
+                    choices=["concat", "confidence"],
+                    help="BEV 融合模式：concat baseline 或 spatial-aware confidence")
     
     # 人体模型和损失
     ap.add_argument("--person_h", type=float, default=DEFAULT_PERSON_H,
@@ -247,9 +251,10 @@ def main():
         pretrained=args.pretrained,
         feat_ch=DEFAULT_FEAT_CH,
         add_coord=True,
+        fusion_mode=args.fusion_mode,
     )
     
-    print(f"[MODEL] {type(model).__name__}")
+    print(f"[MODEL] {type(model).__name__} fusion_mode={args.fusion_mode}")
     
     # ========== 5. 创建优化器和调度器 ==========
     print("\n[OPT] Creating optimizer and scheduler...")
