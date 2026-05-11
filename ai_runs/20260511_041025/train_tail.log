@@ -1,0 +1,41 @@
+[archive note]
+Colab training/evaluation completed successfully. This train_tail.log records sanitized observed notebook output from the controlled ALPHA=2.0 reproduction run. Private Drive paths and credential-related values are intentionally omitted.
+
+Experiment:
+ALPHA=2.0 FUSION_MODE=confidence BEV_POS_WEIGHT=1.0 BEV_NEG_WEIGHT=1.0 IMG_POS_WEIGHT=1.0 IMG_NEG_WEIGHT=1.0 python scripts/run_colab_exp.py
+python src/evaluate_main.py --data_root /content/BEV_Track-Predict/wildtrack --views 0,1,2 --max_frames 300 --batch 2 --model_path /content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth --fusion_mode confidence --alpha 2.0 --report_detection --det_min_distance 0.0 --det_nms_ksize 3 --det_max_preds 200 --det_dist_thr 3.0 --metrics_out /content/BEV_Track-Predict/runs/wildtrack_baseline/eval_metrics.json
+
+Observed final training tail:
+[step 1370] loss=0.013417 bev=0.010194 img=0.001612 pos_mse=0.885745 aux_pos_mse=0.999972 pred_raw=[-6.483,-0.480] mean=-3.908 max_gt=1.000 lr=0.00362
+[step 1390] loss=0.017801 bev=0.013511 img=0.002145 pos_mse=0.900373 aux_pos_mse=0.999982 pred_raw=[-6.506,-0.677] mean=-4.023 max_gt=1.000 lr=0.00259
+[step 1410] loss=0.011541 bev=0.008759 img=0.001391 pos_mse=0.864533 aux_pos_mse=0.999983 pred_raw=[-6.560,-0.273] mean=-3.947 max_gt=1.000 lr=0.00172
+[step 1430] loss=0.014041 bev=0.010474 img=0.001784 pos_mse=0.868312 aux_pos_mse=0.999983 pred_raw=[-7.271,-0.434] mean=-3.896 max_gt=1.000 lr=0.00103
+[step 1450] loss=0.012160 bev=0.008891 img=0.001634 pos_mse=0.862511 aux_pos_mse=0.999988 pred_raw=[-7.133,-0.425] mean=-4.011 max_gt=1.000 lr=0.00052
+[step 1470] loss=0.013167 bev=0.009902 img=0.001633 pos_mse=0.880561 aux_pos_mse=0.999993 pred_raw=[-7.162,-0.345] mean=-4.030 max_gt=1.000 lr=0.00018
+[step 1490] loss=0.014826 bev=0.010995 img=0.001915 pos_mse=0.878560 aux_pos_mse=0.999971 pred_raw=[-6.634,-1.175] mean=-4.087 max_gt=1.000 lr=0.00001
+[Epoch 9] loss=0.014451 bev=0.010681 img=0.001885
+[CKPT] saved outputs/train_multicam_mvdet_style_v3/model_epoch9.pth
+[SAVE] Saving final model...
+[OK] saved outputs/train_multicam_mvdet_style_v3/model_final.pth
+
+Observed summary:
+### BEV_ALPHA_2_CONFIDENCE_REPRO_DONE
+ITERATION_ID 20260511_041025
+GIT_COMMIT 65c96bc1e158c7a85b78bee70122e28685f66879
+success true
+return_code 0
+error.log No error.
+alpha 2.0
+fusion_mode confidence
+views 0,1,2
+max_frames 300
+checkpoint_path /content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth
+loss 0.014492000409712394
+det_min_distance 0.0
+det_best_threshold 0.1
+det_precision 0.09330651469437926
+det_recall 0.11084561263772734
+det_f1 0.10132265501759496
+det_loc_err_m 0.19468057917977521
+det_fp 8114.0
+det_fn 6698.0
