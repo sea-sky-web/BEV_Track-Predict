@@ -1,0 +1,102 @@
+{
+  "exp_name": "wildtrack_baseline",
+  "success": true,
+  "return_code": 0,
+  "duration_seconds": null,
+  "target_metric": "moda",
+  "target_value": 0.75,
+  "experiment_config": {
+    "dataset": "WildTrack",
+    "data_root": "/content/BEV_Track-Predict/wildtrack",
+    "views": "0,1,2",
+    "max_frames": null,
+    "epochs": 10,
+    "batch_size": 2,
+    "fusion_mode": "confidence",
+    "alpha": 2.0,
+    "loss_config": {
+      "bev_pos_weight": 1.0,
+      "bev_neg_weight": 1.0,
+      "img_pos_weight": 1.0,
+      "img_neg_weight": 1.0
+    },
+    "train_command": [
+      "python",
+      "scripts/train_main.py",
+      "--data_root",
+      "/content/BEV_Track-Predict/wildtrack",
+      "--epochs",
+      "10",
+      "--batch",
+      "2",
+      "--fusion_mode",
+      "confidence",
+      "--alpha",
+      "2.0"
+    ],
+    "checkpoint_path": "/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth",
+    "metrics_sources": [
+      "actual_metrics.json",
+      "eval_metrics.json",
+      "metrics_raw.json"
+    ],
+    "evaluation_command": [
+      "python",
+      "src/evaluate_main.py",
+      "--data_root",
+      "/content/BEV_Track-Predict/wildtrack",
+      "--views",
+      "0,1,2",
+      "--max_frames",
+      "300",
+      "--batch",
+      "2",
+      "--model_path",
+      "outputs/train_multicam_mvdet_style_v3/model_final.pth",
+      "--fusion_mode",
+      "confidence",
+      "--report_detection",
+      "--metrics_out",
+      "runs/wildtrack_baseline/eval_metrics.json"
+    ]
+  },
+  "dataset": "WildTrack",
+  "views": "0,1,2",
+  "max_frames": null,
+  "fusion_mode": "confidence",
+  "alpha": 2.0,
+  "checkpoint_path": "/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth",
+  "actual_metrics": {
+    "loss": 0.012627189572279651,
+    "det_min_distance": 0.0,
+    "det_nms_ksize": 3,
+    "det_max_preds": 200,
+    "det_dist_thr": 3.0,
+    "det_thresholds": "0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50",
+    "extraction_config": {
+      "det_min_distance": 0.0,
+      "det_nms_ksize": 3,
+      "det_max_preds": 200,
+      "det_dist_thr": 3.0,
+      "det_thresholds": "0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50"
+    },
+    "det_best_threshold": 0.1,
+    "det_precision": 0.09431333275276496,
+    "det_recall": 0.14376742333731582,
+    "det_f1": 0.11390408077408498,
+    "det_loc_err_m": 0.1909927351212788,
+    "det_tp": 1083.0,
+    "det_fp": 10400.0,
+    "det_fn": 6450.0,
+    "det_loc_err_px": 1.909927351212788
+  },
+  "log_path": "/content/BEV_Track-Predict/runs/wildtrack_baseline/train.log",
+  "error_path": "/content/BEV_Track-Predict/runs/wildtrack_baseline/error.log",
+  "timestamp": "20260511_030352",
+  "git_commit": "87bca6b76a07651d7c288ae5438f66e9a5ca33b1",
+  "ai_feedback": {
+    "status": "need_analysis",
+    "instruction": "请读取 ai_runs/latest 中的文件，分析训练结果并给出下一步修改。"
+  },
+  "archive_note": "Colab training/evaluation completed successfully, but Colab Secret token access timed out during push; ai_runs artifacts were completed through the GitHub connector from the observed notebook summary."
+}
