@@ -1,0 +1,35 @@
+[archive note]
+Colab training/evaluation completed successfully. This train_tail.log records sanitized observed notebook output and final summary recovered from the completed Colab cell, not the full raw train.log tail. Private Drive paths and credential-related values are intentionally omitted.
+
+Experiment:
+ALPHA=2.0 FUSION_MODE=confidence python scripts/run_colab_exp.py
+python src/evaluate_main.py --data_root /content/BEV_Track-Predict/wildtrack --views 0,1,2 --max_frames 300 --batch 2 --model_path /content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth --fusion_mode confidence --report_detection --metrics_out /content/BEV_Track-Predict/runs/wildtrack_baseline/eval_metrics.json
+python scripts/commit_ai_runs.py
+
+Observed Colab output:
+RC 0 :: python scripts/run_colab_exp.py
+RC 0 :: python src/evaluate_main.py --data_root /content/BEV_Track-Predict/wildtrack --views 0,1,2 --max_frames 300 --batch 2 --model_path /content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth --fusion_mode confidence --report_detection --metrics_out /content/BEV_Track-Predict/runs/wildtrack_baseline/eval_metrics.json
+GITHUB_TOKEN_SOURCE unavailable TimeoutException
+RC 0 :: python scripts/commit_ai_runs.py
+COMMIT_AI_RUNS_RC 0
+
+### BEV_ALPHA_2_CONFIDENCE_EXPERIMENT_DONE
+ITERATION_ID 20260511_030352
+GIT_COMMIT 87bca6b76a07651d7c288ae5438f66e9a5ca33b1
+success true
+return_code 0
+error.log No error.
+alpha 2.0
+fusion_mode confidence
+views 0,1,2
+max_frames 300
+checkpoint_path /content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth
+loss 0.012627189572279651
+det_min_distance 0.0
+det_best_threshold 0.1
+det_precision 0.09431333275276496
+det_recall 0.14376742333731582
+det_f1 0.11390408077408498
+det_loc_err_m 0.1909927351212788
+det_fp 10400.0
+det_fn 6450.0
