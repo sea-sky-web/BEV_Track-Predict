@@ -70,16 +70,19 @@ def build_mvdet_proj_mat(
     worldgrid2worldcoord: np.ndarray,
 ) -> np.ndarray:
     """
-    构建 MVDet 风格的投影矩阵
+    构建图像特征平面到 BEV 网格的投影矩阵
     
-    将世界网格坐标映射到图像特征平面坐标。
+    返回值遵循 `warp_perspective_torch` 的约定：
+    source 是图像特征平面 `(u, v)`，destination 是 BEV heatmap
+    的 `(grid_x, grid_y)`。本仓库的 BEV tensor shape 是
+    `(H=grid_y, W=grid_x)`，因此矩阵本身不交换 x/y。
     
     完整变换链：
         1. 世界网格坐标 (grid_x, grid_y, 1)
         2. → 世界坐标系 (X, Y, 1) via worldgrid2worldcoord
         3. → 相机坐标系 (Xc, Yc, Zc) via [R|t]
         4. → 图像坐标系 (u, v, 1) via K
-        5. → 图像特征平面 (u', v', 1) via permutation
+        5. 对上式求逆得到 image feature `(u, v)` → BEV `(grid_x, grid_y)`
     
     数学推导（对标 MVDet 源码）：
         extr = [R | t]  (3x4 矩阵：world to camera)
@@ -87,9 +90,12 @@ def build_mvdet_proj_mat(
         worldcoord2imgcoord = K @ extr_3x3
         worldgrid2imgcoord = worldcoord2imgcoord @ worldgrid2worldcoord
         imgcoord2worldgrid = inv(worldgrid2imgcoord)
-        proj_mat = permutation @ imgcoord2worldgrid
+        proj_mat = imgcoord2worldgrid
     
-    其中 permutation 用于交换 (u, v) 坐标顺序。
+    注意：MVDet 官方实现里有一个 permutation，是因为其 WildTrack
+    map tensor 使用 `worldgrid_shape=[480,1440]`，将 grid_x 放在行维。
+    本仓库的 GT/eval 都使用 `(NB_HEIGHT=1440, NB_WIDTH=480)`，也就是
+    row=grid_y、col=grid_x；继续套用该 permutation 会把 BEV x/y 交换。
     
     Args:
         K_feat: 缩放后的相机内参 (3, 3)
@@ -100,7 +106,7 @@ def build_mvdet_proj_mat(
         
     Returns:
         np.ndarray: 投影矩阵 (3, 3)，dtype=float64
-                   可用于将 BEV 网格点投影到图像特征平面
+                   可用于将图像特征平面点投影到 BEV 网格
                    
     Raises:
         np.linalg.LinAlgError: 如果投影矩阵奇异（无法求逆）
@@ -133,18 +139,7 @@ def build_mvdet_proj_mat(
     # 反向变换：图像坐标回到世界网格坐标
     imgcoord2worldgrid = np.linalg.inv(worldgrid2imgcoord)
     
-    # 交换坐标顺序的排列矩阵
-    # 从 (u, v, 1) 到 (v, u, 1)（或反之）
-    # 这确保与 MVDet 源码的坐标约定一致
-    permutation = np.array([
-        [0, 1, 0],
-        [1, 0, 0],
-        [0, 0, 1]
-    ], dtype=np.float64)
-    
-    proj = permutation @ imgcoord2worldgrid
-    
-    return proj
+    return imgcoord2worldgrid
 
 
 def compute_valid_ratio_from_homography(
