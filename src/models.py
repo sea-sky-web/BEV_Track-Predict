@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
-from geometry import warp_perspective_torch
+from geometry import warp_perspective_torch, precompute_warp_grid
 
 
 class ResNet50Stride8Trunk(nn.Module):
@@ -266,8 +266,13 @@ class MVDetLikeNet(nn.Module):
         # 单视角预测头
         self.img_head = ImgHeadFoot(in_ch=feat_ch, mid_ch=128)
         
-        # 投影矩阵（静态 buffer，不参与优化）
-        self.register_buffer("proj_mats", proj_mats.detach().clone())
+        # 预计算采样网格（避免每次前向传播时重复计算透视变换矩阵的逆）
+        # proj_mats: (V, 3, 3)
+        proj_grid = precompute_warp_grid(proj_mats.detach().clone(), feat_hw, reduced_hw)
+        self.register_buffer("proj_grid", proj_grid, persistent=False) # (V, Hb, Wb, 2)
+
+        # 投影矩阵（静态 buffer，不参与优化，保留备用）
+        self.register_buffer("proj_mats", proj_mats.detach().clone(), persistent=False)
         
         # 计算 BEV 融合特征的输入通道数
         if fusion_mode == "concat":
@@ -331,9 +336,14 @@ class MVDetLikeNet(nn.Module):
             img_logit = self.img_head(f)  # (B, 2, Hf, Wf)
             imgs_logits.append(img_logit)
             
-            # 投影到 BEV
-            M = self.proj_mats[vi].unsqueeze(0).expand(B, -1, -1)  # (B, 3, 3)
-            bev = warp_perspective_torch(f, M, dsize=(self.Hb, self.Wb))  # (B, feat_ch, Hb, Wb)
+            # 投影到 BEV（使用预计算的网格进行 F.grid_sample）
+            grid_expanded = self.proj_grid[vi].unsqueeze(0).expand(B, -1, -1, -1)
+            bev = F.grid_sample(
+                f, grid_expanded,
+                mode="bilinear",
+                padding_mode="zeros",
+                align_corners=True
+            )
             feats_bev.append(bev)
         
         # 堆叠单视角预测

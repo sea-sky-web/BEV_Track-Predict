@@ -382,3 +382,66 @@ def create_grid_sampler(
         return F.grid_sample(src, grid, mode="bilinear", padding_mode="zeros", align_corners=True)
     
     return sampler
+
+def precompute_warp_grid(
+    M_src2dst: torch.Tensor,
+    src_hw: Tuple[int, int],
+    dst_hw: Tuple[int, int]
+) -> torch.Tensor:
+    """
+    预计算透视变换的采样网格
+
+    用于在模型初始化时计算好采样网格，避免在前向传播中重复计算。
+
+    Args:
+        M_src2dst: Homography 矩阵 (N, 3, 3) 或 (3, 3)
+        src_hw: 源特征图尺寸 (Hs, Ws)
+        dst_hw: 目标特征图尺寸 (Hd, Wd)
+
+    Returns:
+        torch.Tensor: 预计算的网格 (N, Hd, Wd, 2)，dtype=torch.float32
+    """
+    if M_src2dst.dim() == 2:
+        M_src2dst = M_src2dst.unsqueeze(0)
+
+    N = M_src2dst.shape[0]
+    Hs, Ws = src_hw
+    Hd, Wd = dst_hw
+    device = M_src2dst.device
+    calc_dtype = torch.float64
+
+    ys, xs = torch.meshgrid(
+        torch.arange(Hd, device=device, dtype=calc_dtype),
+        torch.arange(Wd, device=device, dtype=calc_dtype),
+        indexing="ij"
+    )
+    ones = torch.ones_like(xs)
+    dst_h = torch.stack([xs, ys, ones], dim=0).reshape(3, -1)
+    dst_h = dst_h.unsqueeze(0).expand(N, -1, -1) # (N, 3, Hd*Wd)
+
+    M_inv = torch.linalg.inv(M_src2dst.to(dtype=calc_dtype))
+    src_h = M_inv @ dst_h
+
+    z = src_h[:, 2]
+    z_safe = torch.where(z >= 0.0, z.clamp_min(1e-6), z.clamp_max(-1e-6))
+    valid = (
+        torch.isfinite(src_h[:, 0]) &
+        torch.isfinite(src_h[:, 1]) &
+        torch.isfinite(z) &
+        (z > 1e-6)
+    )
+    x = src_h[:, 0] / z_safe
+    y = src_h[:, 1] / z_safe
+
+    ws_denom = float(max(Ws - 1, 1))
+    hs_denom = float(max(Hs - 1, 1))
+    x_norm = 2.0 * (x / ws_denom) - 1.0
+    y_norm = 2.0 * (y / hs_denom) - 1.0
+    x_norm = torch.nan_to_num(x_norm, nan=2.0, posinf=2.0, neginf=-2.0)
+    y_norm = torch.nan_to_num(y_norm, nan=2.0, posinf=2.0, neginf=-2.0)
+    invalid_fill = torch.full_like(x_norm, 2.0)
+    x_norm = torch.where(valid, x_norm, invalid_fill)
+    y_norm = torch.where(valid, y_norm, invalid_fill)
+
+    grid = torch.stack([x_norm, y_norm], dim=-1).reshape(N, Hd, Wd, 2)
+    return grid.to(dtype=torch.float32)

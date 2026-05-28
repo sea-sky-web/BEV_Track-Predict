@@ -1,0 +1,3 @@
+## 2025-02-12 - Precomputing homography grids
+**Learning:** The method `warp_perspective_torch` performs a lot of heavy lifting for every forward pass per view by generating a meshgrid and inverting the homography matrix sequentially. In a multi-view tracking setup like MVDet, the mapping matrices are static. This means we can completely eliminate this sequential CPU/GPU overhead by computing the grids once during model initialization.
+**Action:** Always check if perspective or spatial transformations utilize static parameters (like camera extrinsics/intrinsics on fixed cameras) and precompute the `F.grid_sample` grid rather than recalculating the transformation per-frame.
