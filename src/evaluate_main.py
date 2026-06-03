@@ -50,13 +50,25 @@ from utils import build_gaussian_kernel_2d
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
-        description="Evaluate MVDet-like model (loss metrics + optional detection metrics)."
-    )
+        description="Evaluate MVDet-like model (loss metrics + optional detection metrics).")
 
-    ap.add_argument("--data_root", type=str, default=DEFAULT_DATA_ROOT, help="Wildtrack dataset root")
-    ap.add_argument("--views", type=str, default="0,1,2", help="View IDs, e.g. 0,1,2")
-    ap.add_argument("--drop_bad_views", action="store_true", help="Drop views with low valid projection ratio")
-    ap.add_argument("--valid_thr", type=float, default=DEFAULT_VALID_THR, help="Projection valid ratio threshold")
+    ap.add_argument(
+        "--data_root",
+        type=str,
+        default=DEFAULT_DATA_ROOT,
+        help="Wildtrack dataset root")
+    ap.add_argument(
+        "--views",
+        type=str,
+        default="0,1,2",
+        help="View IDs, e.g. 0,1,2")
+    ap.add_argument("--drop_bad_views", action="store_true",
+                    help="Drop views with low valid projection ratio")
+    ap.add_argument(
+        "--valid_thr",
+        type=float,
+        default=DEFAULT_VALID_THR,
+        help="Projection valid ratio threshold")
 
     ap.add_argument(
         "--model_path",
@@ -64,19 +76,63 @@ def parse_args() -> argparse.Namespace:
         default=str(Path(DEFAULT_OUTPUT_DIR) / "model_final.pth"),
         help="Path to model weights (.pth)",
     )
-    ap.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="Device")
+    ap.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        choices=[
+            "cuda",
+            "cpu"],
+        help="Device")
 
-    ap.add_argument("--frame_start", type=int, default=0, help="Start frame index (annotation list index)")
-    ap.add_argument("--max_frames", type=int, default=DEFAULT_MAX_FRAMES, help="Number of frames to evaluate")
-    ap.add_argument("--batch", type=int, default=DEFAULT_BATCH_SIZE, help="Batch size")
-    ap.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS, help="Dataloader workers")
+    ap.add_argument("--frame_start", type=int, default=0,
+                    help="Start frame index (annotation list index)")
+    ap.add_argument(
+        "--max_frames",
+        type=int,
+        default=DEFAULT_MAX_FRAMES,
+        help="Number of frames to evaluate")
+    ap.add_argument(
+        "--batch",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="Batch size")
+    ap.add_argument(
+        "--num_workers",
+        type=int,
+        default=DEFAULT_NUM_WORKERS,
+        help="Dataloader workers")
 
-    ap.add_argument("--bev_down", type=int, default=DEFAULT_BEV_DOWN, help="BEV downsample factor")
-    ap.add_argument("--feat_h", type=int, default=DEFAULT_FEAT_H, help="Feature map height")
-    ap.add_argument("--feat_w", type=int, default=DEFAULT_FEAT_W, help="Feature map width")
-    ap.add_argument("--img_h", type=int, default=DEFAULT_IMG_H, help="Input image height")
-    ap.add_argument("--img_w", type=int, default=DEFAULT_IMG_W, help="Input image width")
-    ap.add_argument("--person_h", type=float, default=DEFAULT_PERSON_H, help="Person height (meters)")
+    ap.add_argument(
+        "--bev_down",
+        type=int,
+        default=DEFAULT_BEV_DOWN,
+        help="BEV downsample factor")
+    ap.add_argument(
+        "--feat_h",
+        type=int,
+        default=DEFAULT_FEAT_H,
+        help="Feature map height")
+    ap.add_argument(
+        "--feat_w",
+        type=int,
+        default=DEFAULT_FEAT_W,
+        help="Feature map width")
+    ap.add_argument(
+        "--img_h",
+        type=int,
+        default=DEFAULT_IMG_H,
+        help="Input image height")
+    ap.add_argument(
+        "--img_w",
+        type=int,
+        default=DEFAULT_IMG_W,
+        help="Input image width")
+    ap.add_argument(
+        "--person_h",
+        type=float,
+        default=DEFAULT_PERSON_H,
+        help="Person height (meters)")
     ap.add_argument(
         "--fusion_mode",
         type=str,
@@ -85,29 +141,58 @@ def parse_args() -> argparse.Namespace:
         help="BEV fusion mode used by the checkpoint.",
     )
 
-    ap.add_argument("--alpha", type=float, default=DEFAULT_ALPHA, help="Aux image loss weight")
-    ap.add_argument("--map_ksize", type=int, default=DEFAULT_MAP_KSIZE, help="Gaussian kernel size for BEV")
-    ap.add_argument("--map_sigma", type=float, default=DEFAULT_MAP_SIGMA, help="Gaussian sigma for BEV")
-    ap.add_argument("--img_ksize", type=int, default=DEFAULT_IMG_KSIZE, help="Gaussian kernel size for image")
-    ap.add_argument("--img_sigma", type=float, default=DEFAULT_IMG_SIGMA, help="Gaussian sigma for image")
+    ap.add_argument(
+        "--alpha",
+        type=float,
+        default=DEFAULT_ALPHA,
+        help="Aux image loss weight")
+    ap.add_argument(
+        "--map_ksize",
+        type=int,
+        default=DEFAULT_MAP_KSIZE,
+        help="Gaussian kernel size for BEV")
+    ap.add_argument(
+        "--map_sigma",
+        type=float,
+        default=DEFAULT_MAP_SIGMA,
+        help="Gaussian sigma for BEV")
+    ap.add_argument(
+        "--img_ksize",
+        type=int,
+        default=DEFAULT_IMG_KSIZE,
+        help="Gaussian kernel size for image")
+    ap.add_argument(
+        "--img_sigma",
+        type=float,
+        default=DEFAULT_IMG_SIGMA,
+        help="Gaussian sigma for image")
     ap.add_argument("--log_every", type=int, default=20, help="Log interval")
 
-    ap.add_argument("--report_detection", action="store_true", help="Report detection metrics")
+    ap.add_argument(
+        "--report_detection",
+        action="store_true",
+        help="Report detection metrics")
     ap.add_argument(
         "--det_thresholds",
         type=str,
         default="0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50",
         help="Comma-separated detection thresholds",
     )
-    ap.add_argument("--det_dist_thr", type=float, default=3.0, help="Match distance threshold (BEV cells)")
-    ap.add_argument("--det_nms_ksize", type=int, default=3, help="NMS kernel size (odd int)")
+    ap.add_argument("--det_dist_thr", type=float, default=3.0,
+                    help="Match distance threshold (BEV cells)")
+    ap.add_argument(
+        "--det_nms_ksize",
+        type=int,
+        default=3,
+        help="NMS kernel size (odd int)")
     ap.add_argument(
         "--det_min_distance",
         type=float,
         default=0.0,
         help="Optional greedy suppression distance between predicted BEV peaks. 0 disables it.",
     )
-    ap.add_argument("--det_max_preds", type=int, default=200, help="Max predictions per frame after NMS")
+    ap.add_argument("--det_max_preds", type=int, default=200,
+                    help="Max predictions per frame after NMS")
 
     ap.add_argument(
         "--metrics_out",
@@ -157,7 +242,9 @@ def _build_projection(
 
     step_m = float(pom.get("STEP", 0.025))
     unit_scale = decide_unit_scale(step_m, t_norms)
-    print(f"[UNIT] step={step_m}, median||t||={np.median(t_norms):.2f} => unit_scale={unit_scale}")
+    print(
+        f"[UNIT] step={step_m}, median||t||={
+            np.median(t_norms):.2f} => unit_scale={unit_scale}")
 
     hb = int(pom.get("NB_HEIGHT", 1440)) // bev_down
     wb = int(pom.get("NB_WIDTH", 480)) // bev_down
@@ -166,7 +253,8 @@ def _build_projection(
     sx_f = wf / IMG_ORI_W
     sy_f = hf / IMG_ORI_H
     for v in views:
-        calib_cache[v]["K_feat"] = scale_intrinsics(calib_cache[v]["K0"], sx=sx_f, sy=sy_f)
+        calib_cache[v]["K_feat"] = scale_intrinsics(
+            calib_cache[v]["K0"], sx=sx_f, sy=sy_f)
 
     origin_x_m = float(pom.get("ORIGINE_X", -3.0))
     origin_y_m = float(pom.get("ORIGINE_Y", -9.0))
@@ -191,7 +279,10 @@ def _build_projection(
             raise RuntimeError("Projection matrix is singular.")
 
         vr = compute_valid_ratio_from_homography(proj, (hf, wf), (hb, wb))
-        print(f"[GRID] view={v} cam={calib_cache[v]['cam']} valid_ratio={vr:.4f}")
+        print(
+            f"[GRID] view={v} cam={
+                calib_cache[v]['cam']} valid_ratio={
+                vr:.4f}")
         if drop_bad_views and vr < valid_thr:
             print(f"[GRID] drop view={v}")
             continue
@@ -200,9 +291,11 @@ def _build_projection(
         kept_views.append(v)
 
     if not kept_views:
-        raise RuntimeError("No valid view remained after projection filtering.")
+        raise RuntimeError(
+            "No valid view remained after projection filtering.")
 
-    return calib_cache, torch.stack(proj_mats, dim=0), kept_views, unit_scale, (hb, wb), pom, step_m
+    return calib_cache, torch.stack(
+        proj_mats, dim=0), kept_views, unit_scale, (hb, wb), pom, step_m
 
 
 def evaluate_model(
@@ -237,25 +330,35 @@ def evaluate_model(
             imgs_res = torch.sigmoid(imgs_logits)
 
             bev_loss = criterion(map_res, map_gt, map_kernel)
-            per_view_loss = 0.0
-            for vi in range(imgs_res.shape[1]):
-                per_view_loss = per_view_loss + criterion(imgs_res[:, vi], imgs_gt[:, vi], img_kernel)
-            per_view_loss = per_view_loss / float(imgs_res.shape[1])
+
+            # ⚡ Bolt Optimization: Vectorize per-view loss calculation
+            B, V, C, H, W = imgs_res.shape
+            imgs_res_flat = imgs_res.reshape(B * V, C, H, W)
+            imgs_gt_flat = imgs_gt.reshape(B * V, C, H, W)
+
+            # kernel does not need expanding as GaussianMSE accepts (1, 1, K, K) kernel
+            # criterion normally averages over batch, so by flattening B*V it
+            # implicitly averages across views too
+            per_view_loss = criterion(imgs_res_flat, imgs_gt_flat, img_kernel)
+
             loss = bev_loss + alpha * per_view_loss
 
             losses.append(loss.item())
             bev_losses.append(bev_loss.item())
             img_losses.append(per_view_loss.item())
 
-            pooled_gt = F.adaptive_max_pool2d(map_gt, output_size=map_res.shape[-2:])
+            pooled_gt = F.adaptive_max_pool2d(
+                map_gt, output_size=map_res.shape[-2:])
             pos_mask = pooled_gt > 0.1
-            pos_mse = ((map_res - pooled_gt) ** 2)[pos_mask].mean().item() if pos_mask.any() else float("nan")
+            pos_mse = (
+                (map_res -
+                 pooled_gt) ** 2)[pos_mask].mean().item() if pos_mask.any() else float("nan")
             pos_mses.append(pos_mse)
 
             aux_pos_mask = imgs_gt > 0.1
-            aux_pos_mse = ((imgs_res - imgs_gt) ** 2)[aux_pos_mask].mean().item() if aux_pos_mask.any() else float(
-                "nan"
-            )
+            aux_pos_mse = (
+                (imgs_res -
+                 imgs_gt) ** 2)[aux_pos_mask].mean().item() if aux_pos_mask.any() else float("nan")
             aux_pos_mses.append(aux_pos_mse)
 
             if collect_detection_inputs:
@@ -292,9 +395,13 @@ def _extract_points(
     min_distance: float = 0.0,
 ) -> np.ndarray:
     if heatmap.ndim != 2:
-        raise ValueError(f"Expected 2D heatmap, got shape {tuple(heatmap.shape)}")
+        raise ValueError(
+            f"Expected 2D heatmap, got shape {
+                tuple(
+                    heatmap.shape)}")
     if nms_ksize <= 0 or nms_ksize % 2 == 0:
-        raise ValueError(f"det_nms_ksize must be a positive odd integer, got {nms_ksize}")
+        raise ValueError(
+            f"det_nms_ksize must be a positive odd integer, got {nms_ksize}")
     if min_distance < 0.0:
         raise ValueError(f"det_min_distance must be >= 0, got {min_distance}")
 
@@ -321,11 +428,12 @@ def _extract_points(
         for i in range(ys.numel()):
             if not keep_mask[i]:
                 continue
-            dy = ys[i + 1 :] - ys[i]
-            dx = xs[i + 1 :] - xs[i]
+            dy = ys[i + 1:] - ys[i]
+            dx = xs[i + 1:] - xs[i]
             too_close = (dy * dy + dx * dx) < (min_distance * min_distance)
             if too_close.any():
-                suppress_idx = torch.nonzero(too_close, as_tuple=False).view(-1) + i + 1
+                suppress_idx = torch.nonzero(
+                    too_close, as_tuple=False).view(-1) + i + 1
                 keep_mask[suppress_idx] = False
         ys = ys[keep_mask]
         xs = xs[keep_mask]
@@ -342,7 +450,8 @@ def _extract_points(
     return np.stack([ys, xs, scores], axis=1).astype(np.float32)
 
 
-def _match_points(pred_yx: np.ndarray, gt_yx: np.ndarray, dist_thr: float) -> Tuple[int, int, int, float]:
+def _match_points(pred_yx: np.ndarray, gt_yx: np.ndarray,
+                  dist_thr: float) -> Tuple[int, int, int, float]:
     if pred_yx.shape[0] == 0:
         return 0, 0, int(gt_yx.shape[0]), 0.0
     if gt_yx.shape[0] == 0:
@@ -394,11 +503,16 @@ def evaluate_detection(
                 max_preds=max_preds,
                 min_distance=min_distance,
             )
-            pred_yx = pred_pts[:, :2] if pred_pts.size else np.empty((0, 2), dtype=np.float32)
+            pred_yx = pred_pts[:, :2] if pred_pts.size else np.empty(
+                (0, 2), dtype=np.float32)
 
-            gt_yx = torch.nonzero(gt_map > 0, as_tuple=False).cpu().numpy().astype(np.float32)
+            gt_yx = torch.nonzero(
+                gt_map > 0,
+                as_tuple=False).cpu().numpy().astype(
+                np.float32)
 
-            c_tp, c_fp, c_fn, c_dist = _match_points(pred_yx=pred_yx, gt_yx=gt_yx, dist_thr=dist_thr)
+            c_tp, c_fp, c_fn, c_dist = _match_points(
+                pred_yx=pred_yx, gt_yx=gt_yx, dist_thr=dist_thr)
             tp += c_tp
             fp += c_fp
             fn += c_fn
@@ -406,9 +520,11 @@ def evaluate_detection(
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        f1 = (2.0 * precision * recall / (precision + recall)
+              ) if (precision + recall) > 0 else 0.0
         loc_err_px = dist_sum / tp if tp > 0 else float("nan")
-        loc_err_m = loc_err_px * bev_cell_m if np.isfinite(loc_err_px) else float("nan")
+        loc_err_m = loc_err_px * \
+            bev_cell_m if np.isfinite(loc_err_px) else float("nan")
 
         rows.append(
             {
@@ -428,14 +544,17 @@ def evaluate_detection(
     return rows, best
 
 
-def _print_detection_table(rows: Sequence[Dict[str, float]], best_threshold: float) -> None:
+def _print_detection_table(
+        rows: Sequence[Dict[str, float]], best_threshold: float) -> None:
     print("\n" + "=" * 56)
     print("Detection Sweep (BEV)")
     print("=" * 56)
     print("thr      precision  recall     f1         loc_err(m)")
     for row in rows:
         mark = "*" if abs(row["threshold"] - best_threshold) < 1e-12 else " "
-        loc_m = "nan" if not np.isfinite(row["loc_err_m"]) else f"{row['loc_err_m']:.4f}"
+        loc_m = "nan" if not np.isfinite(
+            row["loc_err_m"]) else f"{
+            row['loc_err_m']:.4f}"
         print(
             f"{mark}{row['threshold']:<8.2f} "
             f"{row['precision']:<10.4f} "
@@ -446,7 +565,10 @@ def _print_detection_table(rows: Sequence[Dict[str, float]], best_threshold: flo
     print("=" * 56)
 
 
-def _load_model_weights(model: torch.nn.Module, model_path: Path, device: torch.device) -> None:
+def _load_model_weights(
+        model: torch.nn.Module,
+        model_path: Path,
+        device: torch.device) -> None:
     payload = torch.load(model_path, map_location=device)
     if isinstance(payload, dict) and "model_state_dict" in payload:
         state_dict = payload["model_state_dict"]
@@ -492,7 +614,12 @@ def main() -> Dict[str, float]:
         valid_thr=args.valid_thr,
     )
 
-    print(f"[CFG] img={args.img_h}x{args.img_w}, feat={args.feat_h}x{args.feat_w}, bev={reduced_hw}")
+    print(
+        f"[CFG] img={
+            args.img_h}x{
+            args.img_w}, feat={
+                args.feat_h}x{
+                    args.feat_w}, bev={reduced_hw}")
     print(f"[CFG] kept_views={kept_views}")
 
     ds = create_wildtrack_dataset(
@@ -510,7 +637,10 @@ def main() -> Dict[str, float]:
 
     def collate_fn(batch):
         stems, x_views, map_gt, imgs_gt = zip(*batch)
-        return list(stems), torch.stack(x_views, 0), torch.stack(map_gt, 0), torch.stack(imgs_gt, 0)
+        return list(stems), torch.stack(
+            x_views, 0), torch.stack(
+            map_gt, 0), torch.stack(
+            imgs_gt, 0)
 
     loader = DataLoader(
         ds,
@@ -535,10 +665,14 @@ def main() -> Dict[str, float]:
         fusion_mode=args.fusion_mode,
     )
     _load_model_weights(model, model_path, dev)
-    print(f"[MODEL] loaded weights from {model_path} fusion_mode={args.fusion_mode}")
+    print(
+        f"[MODEL] loaded weights from {model_path} fusion_mode={
+            args.fusion_mode}")
 
-    map_kernel = build_gaussian_kernel_2d(args.map_ksize, args.map_sigma, device=dev)
-    img_kernel = build_gaussian_kernel_2d(args.img_ksize, args.img_sigma, device=dev)
+    map_kernel = build_gaussian_kernel_2d(
+        args.map_ksize, args.map_sigma, device=dev)
+    img_kernel = build_gaussian_kernel_2d(
+        args.img_ksize, args.img_sigma, device=dev)
 
     base_metrics, pred_maps, gt_maps = evaluate_model(
         model=model,
@@ -552,7 +686,8 @@ def main() -> Dict[str, float]:
     )
 
     total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    trainable_params = sum(p.numel()
+                           for p in model.parameters() if p.requires_grad)
     model_size_mb = model_path.stat().st_size / (1024 * 1024)
 
     print("\n" + "=" * 56)
@@ -581,7 +716,8 @@ def main() -> Dict[str, float]:
         "det_dist_thr": float(args.det_dist_thr),
         "det_thresholds": args.det_thresholds,
     }
-    output_payload: Dict[str, object] = {**final_metrics, **extraction_config, "extraction_config": extraction_config}
+    output_payload: Dict[str, object] = {
+        **final_metrics, **extraction_config, "extraction_config": extraction_config}
 
     if args.report_detection:
         thresholds = parse_thresholds(args.det_thresholds)
@@ -626,7 +762,11 @@ def main() -> Dict[str, float]:
     if args.metrics_out:
         out_path = Path(args.metrics_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(output_payload, indent=2), encoding="utf-8")
+        out_path.write_text(
+            json.dumps(
+                output_payload,
+                indent=2),
+            encoding="utf-8")
         print(f"[SAVE] metrics saved to {out_path}")
 
     return final_metrics
