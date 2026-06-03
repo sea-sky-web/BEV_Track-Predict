@@ -19,14 +19,14 @@ from utils import save_heat_png
 class MVDetTrainer:
     """
     MVDet 风格的训练器
-    
+
     负责完整的训练流程：
     - 前向/反向传播
     - 损失计算（BEV + 图像）
     - 日志记录
     - 模型检查点保存
     - 可视化
-    
+
     Attributes:
         model: 神经网络模型
         device: 计算设备
@@ -36,7 +36,7 @@ class MVDetTrainer:
         scaler: AMP 梯度缩放器
         output_dir: 输出目录
     """
-    
+
     def __init__(
         self,
         model: nn.Module,
@@ -53,7 +53,7 @@ class MVDetTrainer:
     ):
         """
         初始化训练器
-        
+
         Args:
             model: 神经网络模型
             optimizer: 优化器
@@ -82,7 +82,7 @@ class MVDetTrainer:
         self.device = device
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # 损失函数：默认权重 1.0 保持原 GaussianMSE 行为。
         self.bev_criterion = create_loss_criterion(
             weighted=(bev_pos_weight != 1.0 or bev_neg_weight != 1.0),
@@ -95,7 +95,7 @@ class MVDetTrainer:
             neg_weight=img_neg_weight,
         )
         self.criterion = self.bev_criterion
-        
+
         # AMP 梯度缩放器
         self.scaler = torch.amp.GradScaler(
             device=str(device),
@@ -103,14 +103,14 @@ class MVDetTrainer:
         )
         self.amp_enabled = amp_enabled and device.type == "cuda"
         self.freeze_bn = freeze_bn
-        
+
         # 冻结 BatchNorm
         if self.freeze_bn:
             self._freeze_bn()
-        
+
         # 全局步数计数
         self.global_step = 0
-    
+
     def _freeze_bn(self):
         """冻结所有 BatchNorm 层"""
         for m in self.model.modules():
@@ -118,7 +118,7 @@ class MVDetTrainer:
                 m.eval()
                 for p in m.parameters():
                     p.requires_grad_(False)
-    
+
     def train_epoch(
         self,
         train_loader: DataLoader,
@@ -129,14 +129,14 @@ class MVDetTrainer:
     ) -> Dict[str, float]:
         """
         训练一个 epoch
-        
+
         Args:
             train_loader: 训练数据加载器
             map_kernel: BEV 热图的高斯核
             img_kernel: 图像热图的高斯核
             alpha: 图像损失的权重
             log_every: 每多少步打印一次日志
-            
+
         Returns:
             dict: epoch 统计信息
                 - "loss": 平均总损失
@@ -149,46 +149,51 @@ class MVDetTrainer:
         # model.train() 会把 BN 重新切回训练态，这里再次冻结确保语义稳定
         if self.freeze_bn:
             self._freeze_bn()
-        
+
         losses = []
         bev_losses = []
         img_losses = []
         pos_mses = []
         aux_pos_mses = []
-        
-        for batch_idx, (stems, x_views, map_gt, imgs_gt) in enumerate(train_loader):
+
+        for batch_idx, (stems, x_views, map_gt,
+                        imgs_gt) in enumerate(train_loader):
             x_views = x_views.to(self.device, non_blocking=True)
             map_gt = map_gt.to(self.device, non_blocking=True)
             imgs_gt = imgs_gt.to(self.device, non_blocking=True)
-            
+
             self.optimizer.zero_grad(set_to_none=True)
-            
+
             # 前向传播
             with torch.amp.autocast("cuda", enabled=self.amp_enabled):
                 map_logits, imgs_logits = self.model(x_views)
                 map_res = torch.sigmoid(map_logits)
                 imgs_res = torch.sigmoid(imgs_logits)
-                
+
                 # BEV 损失
                 bev_loss = self.bev_criterion(map_res, map_gt, map_kernel)
-                
+
                 # 图像损失（逐视角求和）
-                per_view_loss = 0.0
-                for vi in range(imgs_res.shape[1]):
-                    per_view_loss = per_view_loss + self.img_criterion(
-                        imgs_res[:, vi],
-                        imgs_gt[:, vi],
-                        img_kernel
-                    )
-                per_view_loss = per_view_loss / float(imgs_res.shape[1])
-                
+                # ⚡ Bolt Optimization: Vectorize per-view loss calculation
+                B, V, C, H, W = imgs_res.shape
+                imgs_res_flat = imgs_res.reshape(B * V, C, H, W)
+                imgs_gt_flat = imgs_gt.reshape(B * V, C, H, W)
+
+                # kernel does not need expanding as GaussianMSE accepts (1, 1, K, K) kernel
+                # criterion normally averages over batch, so by flattening B*V
+                # it implicitly averages across views too
+                per_view_loss = self.img_criterion(
+                    imgs_res_flat, imgs_gt_flat, img_kernel)
+
                 # 总损失
                 loss = bev_loss + alpha * per_view_loss
-            
+
             if not torch.isfinite(loss):
                 if batch_idx % log_every == 0:
-                    raw_min = float(torch.nan_to_num(map_logits[0, 0], nan=0.0).min().item())
-                    raw_max = float(torch.nan_to_num(map_logits[0, 0], nan=0.0).max().item())
+                    raw_min = float(torch.nan_to_num(
+                        map_logits[0, 0], nan=0.0).min().item())
+                    raw_max = float(torch.nan_to_num(
+                        map_logits[0, 0], nan=0.0).max().item())
                     print(
                         f"[step {self.global_step}] non-finite loss detected, skip update "
                         f"(bev={bev_loss.item()}, img={per_view_loss.item():.6f}, "
@@ -210,16 +215,17 @@ class MVDetTrainer:
                 loss.backward()
                 self.optimizer.step()
                 self.scheduler.step()
-            
+
             # 记录损失
             losses.append(loss.item())
             bev_losses.append(bev_loss.item())
             img_losses.append(per_view_loss.item())
-            
+
             # 计算指标（不需要梯度）
             with torch.no_grad():
                 # 正样本 MSE
-                pooled_gt = F.adaptive_max_pool2d(map_gt, output_size=map_res.shape[-2:])
+                pooled_gt = F.adaptive_max_pool2d(
+                    map_gt, output_size=map_res.shape[-2:])
                 pos_mask = pooled_gt > 0.1
                 pos_mse = (
                     ((map_res - pooled_gt) ** 2)[pos_mask].mean().item()
@@ -227,7 +233,7 @@ class MVDetTrainer:
                     else float("nan")
                 )
                 pos_mses.append(pos_mse)
-                
+
                 # 辅助正样本 MSE
                 aux_pos_mask = imgs_gt > 0.1
                 aux_pos_mse = (
@@ -236,7 +242,7 @@ class MVDetTrainer:
                     else float("nan")
                 )
                 aux_pos_mses.append(aux_pos_mse)
-            
+
             # 定期打印日志
             if batch_idx % log_every == 0:
                 lr = self.scheduler.get_last_lr()[0]
@@ -244,7 +250,7 @@ class MVDetTrainer:
                 raw_max = float(map_logits[0, 0].max().item())
                 mean_raw = float(map_logits[0, 0].mean().item())
                 max_gt = float(map_gt[0, 0].max().item())
-                
+
                 print(
                     f"[step {self.global_step}] "
                     f"loss={loss.item():.6f} "
@@ -256,9 +262,9 @@ class MVDetTrainer:
                     f"mean={mean_raw:.3f} max_gt={max_gt:.3f} "
                     f"lr={lr:.5f}"
                 )
-            
+
             self.global_step += 1
-        
+
         # 计算 epoch 平均
         if not losses:
             return {
@@ -276,7 +282,7 @@ class MVDetTrainer:
             "pos_mse": np.nanmean(pos_mses),
             "aux_pos_mse": np.nanmean(aux_pos_mses),
         }
-    
+
     def validate(
         self,
         val_loader: DataLoader,
@@ -286,59 +292,61 @@ class MVDetTrainer:
     ) -> Dict[str, float]:
         """
         验证一次
-        
+
         Args:
             val_loader: 验证数据加载器
             map_kernel: BEV 高斯核
             img_kernel: 图像高斯核
             alpha: 图像损失权重
-            
+
         Returns:
             dict: 验证指标
         """
         self.model.eval()
-        
+
         losses = []
         bev_losses = []
         img_losses = []
-        
+
         with torch.no_grad():
             for stems, x_views, map_gt, imgs_gt in val_loader:
                 x_views = x_views.to(self.device, non_blocking=True)
                 map_gt = map_gt.to(self.device, non_blocking=True)
                 imgs_gt = imgs_gt.to(self.device, non_blocking=True)
-                
+
                 map_logits, imgs_logits = self.model(x_views)
                 map_res = torch.sigmoid(map_logits)
                 imgs_res = torch.sigmoid(imgs_logits)
-                
+
                 bev_loss = self.bev_criterion(map_res, map_gt, map_kernel)
-                
-                per_view_loss = 0.0
-                for vi in range(imgs_res.shape[1]):
-                    per_view_loss = per_view_loss + self.img_criterion(
-                        imgs_res[:, vi],
-                        imgs_gt[:, vi],
-                        img_kernel
-                    )
-                per_view_loss = per_view_loss / float(imgs_res.shape[1])
-                
+
+                # ⚡ Bolt Optimization: Vectorize per-view loss calculation
+                B, V, C, H, W = imgs_res.shape
+                imgs_res_flat = imgs_res.reshape(B * V, C, H, W)
+                imgs_gt_flat = imgs_gt.reshape(B * V, C, H, W)
+
+                # kernel does not need expanding as GaussianMSE accepts (1, 1, K, K) kernel
+                # criterion normally averages over batch, so by flattening B*V
+                # it implicitly averages across views too
+                per_view_loss = self.img_criterion(
+                    imgs_res_flat, imgs_gt_flat, img_kernel)
+
                 loss = bev_loss + alpha * per_view_loss
-                
+
                 losses.append(loss.item())
                 bev_losses.append(bev_loss.item())
                 img_losses.append(per_view_loss.item())
-        
+
         return {
             "loss": np.mean(losses),
             "bev_loss": np.mean(bev_losses),
             "img_loss": np.mean(img_losses),
         }
-    
+
     def save_checkpoint(self, epoch: int, best: bool = False):
         """
         保存模型检查点
-        
+
         Args:
             epoch: 当前 epoch
             best: 是否为最佳模型
@@ -350,12 +358,12 @@ class MVDetTrainer:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": self.scheduler.state_dict(),
         }
-        
+
         name = "model_best.pth" if best else f"model_epoch{epoch}.pth"
         path = self.output_dir / name
         torch.save(ckpt, path)
         print(f"[CKPT] saved {path}")
-    
+
     def save_visualizations(
         self,
         stems: list,
@@ -367,7 +375,7 @@ class MVDetTrainer:
     ):
         """
         保存可视化热图
-        
+
         Args:
             stems: 样本名称列表
             map_logits: BEV logits (B, 1, Hb, Wb)
@@ -378,15 +386,18 @@ class MVDetTrainer:
         """
         with torch.no_grad():
             map_res = torch.sigmoid(map_logits)
-            
+
             # 池化 GT 到 BEV 尺寸
             gt_pooled = F.adaptive_max_pool2d(map_gt, output_size=(Hb, Wb))
-            
+
             for i, stem in enumerate(stems):
                 pred = map_res[i, 0].detach().cpu().numpy()
                 gt = gt_pooled[i, 0].detach().cpu().numpy()
-                
-                save_heat_png(self.output_dir / f"{stem}_pred{suffix}.png", pred)
+
+                save_heat_png(
+                    self.output_dir /
+                    f"{stem}_pred{suffix}.png",
+                    pred)
                 save_heat_png(self.output_dir / f"{stem}_gt{suffix}.png", gt)
 
 
@@ -398,13 +409,13 @@ def create_optimizer(
 ) -> torch.optim.SGD:
     """
     创建 SGD 优化器
-    
+
     Args:
         model: 模型
         lr: 初始学习率
         momentum: 动量
         weight_decay: 权重衰减
-        
+
     Returns:
         torch.optim.SGD: 优化器
     """
@@ -424,13 +435,13 @@ def create_scheduler(
 ) -> torch.optim.lr_scheduler.OneCycleLR:
     """
     创建 OneCycle 学习率调度器
-    
+
     Args:
         optimizer: 优化器
         max_lr: 最大学习率
         epochs: 总 epoch 数
         steps_per_epoch: 每个 epoch 的步数
-        
+
     Returns:
         torch.optim.lr_scheduler.OneCycleLR: 调度器
     """

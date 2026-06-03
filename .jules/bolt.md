@@ -1,0 +1,3 @@
+## 2026-05-04 - [Vectorized Multi-view Operations]
+**Learning:** In a multi-view BEV detection architecture, iterating over views via Python for-loops to process feature extractions or calculate per-view losses presents a significant bottleneck, failing to exploit GPU parallelization efficiently. In PyTorch, PyTorch operations typically process the batch dimension in parallel. Merging the batch and view dimensions using `.reshape(B * V, ...)` leverages batch-level parallelism for multi-view processing.
+**Action:** Always flatten the multi-view dimension into the batch dimension before running data through parallelizable modules (e.g., backbone networks, interpolation, loss criteria like GaussianMSE) to maximize GPU utilization.
