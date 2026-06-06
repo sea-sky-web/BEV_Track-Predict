@@ -1,0 +1,3 @@
+## 2026-06-06 - [Geometry Optimization] Fast Coordinate Math in Grid Sampling
+**Learning:** For PyTorch grid sampling and perspective warping, using `float32` for coordinate arithmetic combined with `torch.bmm` provides significant performance improvements. Out-of-bounds handling should leverage `grid_sample`'s native `padding_mode="zeros"` by deliberately generating out-of-bounds coordinates (like setting invalid pixels to `2.0`), rather than using slow mask-filling operations like `torch.where` or `torch.nan_to_num`.
+**Action:** Always prefer `float32` meshgrids, `torch.bmm` for batch transformations, and native out-of-bounds padding modes over manual masking when working with `F.grid_sample` in BEV projection operations.
