@@ -1,0 +1,3 @@
+## 2024-06-10 - PyTorch Grid Sampling Performance
+**Learning:** For PyTorch grid sampling and perspective warping, using `float32` coordinate arithmetic with `torch.bmm` is highly performant. Out-of-bounds handling should leverage `grid_sample`'s native `padding_mode` by pushing invalid coordinates out-of-bounds rather than using complex arithmetic penalties or slow mask-filling operations like `torch.nan_to_num`.
+**Action:** When implementing grid sampling or perspective warping, use `float32` and `torch.bmm`, and handle invalid coordinates by explicitly setting them out-of-bounds (e.g., to `2.0`).
