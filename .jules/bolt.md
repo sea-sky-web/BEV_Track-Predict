@@ -1,0 +1,3 @@
+## 2024-06-14 - Vectorized Multi-View Forward Pass
+**Learning:** PyTorch optimizations inside `MVDetLikeNet` can achieve ~12% faster CPU forward passes by eliminating Python for-loops over camera views (`V`). By folding the view dimension into the batch dimension `(B*V, C, H, W)`, all views are evaluated simultaneously by native C++ kernels for backbone feature extraction, interpolation, head projection, and `warp_perspective_torch`.
+**Action:** Always check if dimensions conceptually separate (like `Views` and `Batch`) can be temporarily folded using `.reshape()` to increase data parallelism and remove Python iteration overhead.
