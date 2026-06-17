@@ -11,6 +11,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from augmentation import ViewCoherentAugment
 from config import (
     NB_WIDTH, NB_HEIGHT,
     STEP_M, ORIGINE_X_M, ORIGINE_Y_M,
@@ -56,6 +57,7 @@ class WildtrackMVDetDataset(Dataset):
         person_h_m: float,
         unit_scale: float,
         calib_cache: Dict[int, Dict[str, Any]],
+        augment: ViewCoherentAugment | None = None,
     ):
         """
         初始化数据集
@@ -70,6 +72,7 @@ class WildtrackMVDetDataset(Dataset):
             person_h_m: 人体高度（米或厘米，单位与标定一致）
             unit_scale: 单位转换因子（1.0 或 100.0）
             calib_cache: 标定数据缓存（包含内参、外参）
+            augment: 训练增强；验证/评估应传 None
         """
         self.data_root = Path(data_root)
         self.views = views
@@ -79,6 +82,7 @@ class WildtrackMVDetDataset(Dataset):
         self.person_h = person_h_m * unit_scale
         self.unit_scale = unit_scale
         self.calib_cache = calib_cache
+        self.augment = augment
         
         # 注释文件目录
         self.ann_dir = self.data_root / "annotations_positions"
@@ -172,7 +176,6 @@ class WildtrackMVDetDataset(Dataset):
             img = self._load_image(img_dir, stem).resize((self.Wi, self.Hi), Image.BILINEAR)
             x = torch.from_numpy(np.array(img, dtype=np.uint8)).float() / 255.0
             x = x.permute(2, 0, 1)  # (3, Hi, Wi)
-            x = (x - self.mean) / self.std  # 标准化
             xs.append(x)
         x_views = torch.stack(xs, dim=0)  # (V, 3, Hi, Wi)
         
@@ -239,6 +242,10 @@ class WildtrackMVDetDataset(Dataset):
                     if 0 <= x < self.Wf and 0 <= y < self.Hf:
                         imgs_gt[vi, 1, y, x] = 1.0
         
+        if self.augment is not None:
+            x_views, map_gt, imgs_gt = self.augment(x_views, map_gt, imgs_gt)
+
+        x_views = (x_views - self.mean) / self.std  # 标准化
         return stem, x_views, map_gt, imgs_gt
 
 
@@ -253,6 +260,7 @@ def create_wildtrack_dataset(
     unit_scale: float,
     calib_cache: Dict[int, Dict[str, Any]],
     frame_start: int = 0,
+    augment: ViewCoherentAugment | None = None,
 ) -> WildtrackMVDetDataset:
     """
     工厂函数：创建 Wildtrack 数据集
@@ -267,6 +275,7 @@ def create_wildtrack_dataset(
         person_h_m: 人体高度
         unit_scale: 单位转换因子
         calib_cache: 标定缓存
+        augment: 训练增强；验证/评估应传 None
         
     Returns:
         WildtrackMVDetDataset: 初始化的数据集
@@ -282,4 +291,5 @@ def create_wildtrack_dataset(
         person_h_m=person_h_m,
         unit_scale=unit_scale,
         calib_cache=calib_cache,
+        augment=augment,
     )

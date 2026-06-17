@@ -152,6 +152,8 @@ Required fields:
 Precision:
 Recall:
 F1:
+MODA:
+MODP:
 Localization error:
 False positives:
 Missed detections:
@@ -266,7 +268,11 @@ device:
 seed:
 checkpoint_path:
 pretrained:
+backbone:
 fusion_mode:
+augment:
+augment_hflip_prob:
+augment_color_jitter:
 optimizer:
 scheduler:
 weight_decay:
@@ -292,6 +298,10 @@ model_path:
 views:
 threshold:
 distance_threshold:
+moda_distance_threshold_m:
+min_distance:
+nms_ksize:
+max_preds:
 metrics_output:
 device:
 max_frames:
@@ -315,6 +325,8 @@ Required fields:
 Precision:
 Recall:
 F1:
+MODA:
+MODP:
 Localization error:
 False positives:
 Missed detections:
@@ -377,7 +389,7 @@ Reason:
 The current result cannot prove whether the fusion module improves performance.
 
 Expected validation:
-A table comparing Precision, Recall, F1, and localization error under the same evaluation configuration.
+A table comparing Precision, Recall, F1, MODA, MODP, and localization error under the same evaluation configuration.
 ```
 
 Do not list multiple unrelated next actions.
@@ -412,14 +424,20 @@ Recommended structure:
   "iteration_id": "YYYYMMDD_HHMMSS",
   "previous_iteration": "YYYYMMDD_HHMMSS",
   "dataset": "WildTrack",
-  "views": "0,1,2",
+  "views": "0,1,2,3,4,5,6",
   "pretrained": true,
-  "fusion_mode": "confidence",
+  "backbone": "resnet18",
+  "fusion_mode": "confidence_v2",
+  "augment": true,
+  "augment_hflip_prob": 0.0,
+  "augment_color_jitter": "0.2,0.2,0.2,0.05",
   "optimizer": "adam",
   "scheduler": "cosine",
   "precision": null,
   "recall": null,
   "f1": null,
+  "moda": null,
+  "modp": null,
   "localization_error": null,
   "false_positives": null,
   "missed_detections": null,
@@ -530,11 +548,15 @@ Metric comparison is valid only when the following are consistent:
 dataset
 views
 max_frames
+backbone
 pretrained status
+fusion mode
+augmentation settings
 optimizer and scheduler
 checkpoint selection rule
 evaluation threshold
 distance threshold
+MODA distance threshold
 metric implementation
 ```
 
@@ -575,7 +597,7 @@ Optimize the architecture.
 Valid:
 
 ```text
-Compare naive fusion and confidence fusion on views 0,1,2 using the same checkpoint and threshold sweep.
+Compare concat and confidence_v2 fusion on all seven WildTrack views using the same checkpoint rule and threshold sweep.
 ```
 
 ---

@@ -190,8 +190,13 @@ error.log
 ```
 
 Each `ai_context.md` must explicitly record the pretrained backbone status,
-optimizer, scheduler, learning rate, weight decay, freeze_backbone_epochs,
-selected views, and max_frames used by the run.
+backbone name, fusion mode, augmentation status, optimizer, scheduler,
+learning rate, weight decay, freeze_backbone_epochs, selected views, and
+max_frames used by the run.
+
+Each formal evaluation must record the point-detection metric fields used for
+comparison, including Precision, Recall, F1, MODA, MODP, localization error,
+false positives, missed detections, and the matching/extraction thresholds.
 
 The timestamped directory is the authoritative experiment record.
 

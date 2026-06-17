@@ -212,7 +212,8 @@ def compute_valid_ratio_from_homography(
 def warp_perspective_torch(
     src: torch.Tensor,
     M_src2dst: torch.Tensor,
-    dsize: Tuple[int, int]
+    dsize: Tuple[int, int],
+    min_valid_ratio: float = 0.0,
 ) -> torch.Tensor:
     """
     PyTorch 纯实现的透视变换
@@ -232,6 +233,7 @@ def warp_perspective_torch(
         M_src2dst: Homography 矩阵 (B, 3, 3) 或 (3, 3)
                    定义从源到目标的变换：dst_coord = M @ src_coord
         dsize: 目标尺寸 (Hd, Wd)
+        min_valid_ratio: 可选有效采样比例下限，0 表示不检查
         
     Returns:
         torch.Tensor: 投影后的特征图 (B, C, Hd, Wd)
@@ -303,6 +305,14 @@ def warp_perspective_torch(
     invalid_fill = torch.full_like(x_norm, 2.0)
     x_norm = torch.where(valid, x_norm, invalid_fill)
     y_norm = torch.where(valid, y_norm, invalid_fill)
+
+    in_bounds = valid & (x >= 0.0) & (x <= float(Ws - 1)) & (y >= 0.0) & (y <= float(Hs - 1))
+    if min_valid_ratio > 0.0:
+        valid_ratio = float(in_bounds.float().mean().item())
+        if valid_ratio < min_valid_ratio:
+            raise ValueError(
+                f"warp valid ratio {valid_ratio:.6f} below required min_valid_ratio={min_valid_ratio:.6f}"
+            )
     
     # 构建采样网格：(B, Hd, Wd, 2)
     grid = torch.stack([x_norm, y_norm], dim=-1).reshape(B, Hd, Wd, 2).to(dtype=dtype)

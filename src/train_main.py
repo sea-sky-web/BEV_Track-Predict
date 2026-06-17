@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from config import (
     DEFAULT_DATA_ROOT, DEFAULT_OUTPUT_DIR,
     DEFAULT_VIEWS, DEFAULT_MAX_FRAMES, DEFAULT_EPOCHS, DEFAULT_BATCH_SIZE,
-    DEFAULT_BEV_DOWN, DEFAULT_FEAT_H, DEFAULT_FEAT_W,
+    DEFAULT_BACKBONE, DEFAULT_BEV_DOWN, DEFAULT_FEAT_H, DEFAULT_FEAT_W,
     DEFAULT_IMG_H, DEFAULT_IMG_W, DEFAULT_PERSON_H,
     DEFAULT_ALPHA, DEFAULT_MAP_KSIZE, DEFAULT_MAP_SIGMA,
     DEFAULT_IMG_KSIZE, DEFAULT_IMG_SIGMA, DEFAULT_PRETRAINED,
@@ -22,9 +22,12 @@ from config import (
     DEFAULT_OPTIMIZER, DEFAULT_SCHEDULER, DEFAULT_MAX_LR, DEFAULT_LR_INIT,
     DEFAULT_MOMENTUM, DEFAULT_WEIGHT_DECAY, DEFAULT_FREEZE_BACKBONE_EPOCHS,
     DEFAULT_NUM_WORKERS, DEFAULT_LOG_EVERY, DEFAULT_VALID_THR, DEFAULT_FEAT_CH,
+    DEFAULT_FUSION_MODE, DEFAULT_AUGMENT, DEFAULT_AUGMENT_HFLIP_PROB,
+    DEFAULT_AUGMENT_COLOR_JITTER,
     CAM_NAMES,
     IMG_ORI_W, IMG_ORI_H,
 )
+from augmentation import ViewCoherentAugment, parse_color_jitter
 from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_pom, scale_intrinsics
 from geometry import make_worldgrid2worldcoord_mat, build_mvdet_proj_mat, compute_valid_ratio_from_homography
 from dataset import create_wildtrack_dataset
@@ -70,6 +73,9 @@ def parse_args():
                     help="批大小")
     
     # 网络架构
+    ap.add_argument("--backbone", type=str, default=DEFAULT_BACKBONE,
+                    choices=["resnet18", "resnet50"],
+                    help="共享图像 backbone：resnet18 默认，resnet50 保留 legacy")
     ap.add_argument("--bev_down", type=int, default=DEFAULT_BEV_DOWN,
                     help="BEV 下采样倍数")
     ap.add_argument("--feat_h", type=int, default=DEFAULT_FEAT_H,
@@ -80,9 +86,9 @@ def parse_args():
                     help="输入图像高度")
     ap.add_argument("--img_w", type=int, default=DEFAULT_IMG_W,
                     help="输入图像宽度")
-    ap.add_argument("--fusion_mode", type=str, default=os.environ.get("FUSION_MODE", "concat"),
-                    choices=["concat", "confidence"],
-                    help="BEV 融合模式：concat baseline 或 spatial-aware confidence")
+    ap.add_argument("--fusion_mode", type=str, default=os.environ.get("FUSION_MODE", DEFAULT_FUSION_MODE),
+                    choices=["concat", "confidence", "confidence_v1", "confidence_v2"],
+                    help="BEV 融合模式：concat、legacy confidence_v1 或 joint attention confidence_v2")
     
     # 人体模型和损失
     ap.add_argument("--person_h", type=float, default=DEFAULT_PERSON_H,
@@ -137,6 +143,17 @@ def parse_args():
                     help="权重衰减")
     ap.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS,
                     help="数据加载线程数")
+
+    # 数据增强
+    ap.add_argument("--augment", nargs="?", const=True, default=DEFAULT_AUGMENT,
+                    type=str2bool, metavar="{true,false}",
+                    help="是否启用训练增强")
+    ap.add_argument("--no-augment", dest="augment", action="store_false",
+                    help="显式禁用训练增强")
+    ap.add_argument("--augment_hflip_prob", type=float, default=DEFAULT_AUGMENT_HFLIP_PROB,
+                    help="训练时视图一致水平翻转概率；默认 0 保持投影几何保守")
+    ap.add_argument("--augment_color_jitter", type=str, default=DEFAULT_AUGMENT_COLOR_JITTER,
+                    help="brightness,contrast,saturation,hue 抖动幅度")
     
     # 日志和检查点
     ap.add_argument("--log_every", type=int, default=DEFAULT_LOG_EVERY,
@@ -242,6 +259,18 @@ def main():
     
     # ========== 3. 创建数据集 ==========
     print("\n[DATA] Creating dataset...")
+    augment = None
+    if args.augment:
+        augment = ViewCoherentAugment(
+            hflip_prob=args.augment_hflip_prob,
+            color_jitter=parse_color_jitter(args.augment_color_jitter),
+            enabled=True,
+        )
+        print(
+            "[AUG] "
+            f"enabled=True hflip_prob={args.augment_hflip_prob} "
+            f"color_jitter={args.augment_color_jitter}"
+        )
     
     ds = create_wildtrack_dataset(
         data_root=data_root,
@@ -253,6 +282,7 @@ def main():
         person_h_m=args.person_h,
         unit_scale=unit_scale,
         calib_cache=calib_cache,
+        augment=augment,
     )
     
     def collate_fn(batch):
@@ -281,12 +311,13 @@ def main():
         feat_hw=(Hf, Wf),
         device=dev,
         pretrained=args.pretrained,
+        backbone=args.backbone,
         feat_ch=DEFAULT_FEAT_CH,
         add_coord=True,
         fusion_mode=args.fusion_mode,
     )
     
-    print(f"[MODEL] {type(model).__name__} fusion_mode={args.fusion_mode}")
+    print(f"[MODEL] {type(model).__name__} backbone={args.backbone} fusion_mode={model.fusion_mode}")
     
     # ========== 5. 创建优化器和调度器 ==========
     print("\n[OPT] Creating optimizer and scheduler...")
@@ -326,6 +357,7 @@ def main():
     print(
         "[OPT] "
         f"pretrained={args.pretrained} "
+        f"backbone={args.backbone} "
         f"optimizer={args.optimizer} "
         f"scheduler={args.scheduler} "
         f"lr_init={args.lr_init} "

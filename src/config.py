@@ -50,12 +50,14 @@ DEFAULT_BATCH_SIZE = 1
 DEFAULT_NUM_WORKERS = 2
 
 # 网络架构
+DEFAULT_BACKBONE = "resnet18"          # MVDet-style default; resnet50 remains legacy
 DEFAULT_BEV_DOWN = 4                   # BEV 下采样倍数
 DEFAULT_FEAT_H = 270                   # 特征图高度
 DEFAULT_FEAT_W = 480                   # 特征图宽度
 DEFAULT_IMG_H = 720                    # 输入图像高度
 DEFAULT_IMG_W = 1280                   # 输入图像宽度
 DEFAULT_FEAT_CH = 512                  # 特征通道数
+DEFAULT_FUSION_MODE = "confidence_v2"  # concat, confidence_v1, confidence_v2
 
 # 人体模型
 DEFAULT_PERSON_H = 1.7                 # 人体高度（米）
@@ -79,9 +81,13 @@ DEFAULT_WEIGHT_DECAY = 1e-4
 DEFAULT_EPOCHS = 10
 DEFAULT_LOG_EVERY = 20
 DEFAULT_FREEZE_BACKBONE_EPOCHS = 3
+DEFAULT_AUGMENT = True
+DEFAULT_AUGMENT_HFLIP_PROB = 0.0       # geometry-safe default; enable only after projection validation
+DEFAULT_AUGMENT_COLOR_JITTER = "0.2,0.2,0.2,0.05"
 
 # 视图过滤
 DEFAULT_VALID_THR = 0.05               # 有效投影比例阈值
+DEFAULT_MODA_DIST_M = 0.5              # MVDet/CLEAR-style matching distance in meters
 
 # 计算设备
 DEFAULT_DEVICE = "cuda"

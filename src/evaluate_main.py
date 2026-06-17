@@ -21,6 +21,7 @@ from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_p
 from config import (
     CAM_NAMES,
     DEFAULT_ALPHA,
+    DEFAULT_BACKBONE,
     DEFAULT_BATCH_SIZE,
     DEFAULT_BEV_DOWN,
     DEFAULT_DATA_ROOT,
@@ -34,9 +35,11 @@ from config import (
     DEFAULT_MAP_KSIZE,
     DEFAULT_MAP_SIGMA,
     DEFAULT_MAX_FRAMES,
+    DEFAULT_MODA_DIST_M,
     DEFAULT_NUM_WORKERS,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_PERSON_H,
+    DEFAULT_FUSION_MODE,
     DEFAULT_VIEWS,
     DEFAULT_VALID_THR,
     IMG_ORI_H,
@@ -45,6 +48,7 @@ from config import (
 from dataset import create_wildtrack_dataset
 from geometry import build_mvdet_proj_mat, compute_valid_ratio_from_homography, make_worldgrid2worldcoord_mat
 from loss import GaussianMSE
+from metrics import aggregate_metrics, compute_moda_modp
 from models import create_model
 from utils import build_gaussian_kernel_2d
 
@@ -79,10 +83,17 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--img_w", type=int, default=DEFAULT_IMG_W, help="Input image width")
     ap.add_argument("--person_h", type=float, default=DEFAULT_PERSON_H, help="Person height (meters)")
     ap.add_argument(
+        "--backbone",
+        type=str,
+        default=DEFAULT_BACKBONE,
+        choices=["resnet18", "resnet50"],
+        help="Backbone topology used by the checkpoint.",
+    )
+    ap.add_argument(
         "--fusion_mode",
         type=str,
-        default=os.environ.get("FUSION_MODE", "concat"),
-        choices=["concat", "confidence"],
+        default=os.environ.get("FUSION_MODE", DEFAULT_FUSION_MODE),
+        choices=["concat", "confidence", "confidence_v1", "confidence_v2"],
         help="BEV fusion mode used by the checkpoint.",
     )
 
@@ -101,6 +112,7 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated detection thresholds",
     )
     ap.add_argument("--det_dist_thr", type=float, default=3.0, help="Match distance threshold (BEV cells)")
+    ap.add_argument("--det_moda_dist_m", type=float, default=DEFAULT_MODA_DIST_M, help="MODA/MODP match threshold in meters")
     ap.add_argument("--det_nms_ksize", type=int, default=3, help="NMS kernel size (odd int)")
     ap.add_argument(
         "--det_min_distance",
@@ -260,10 +272,9 @@ def evaluate_model(
             aux_pos_mses.append(aux_pos_mse)
 
             if collect_detection_inputs:
-                gt_bin = (pooled_gt > 0.1).to(torch.uint8)
                 for bi in range(map_res.shape[0]):
                     pred_maps.append(map_res[bi, 0].detach().cpu())
-                    gt_maps.append(gt_bin[bi, 0].detach().cpu())
+                    gt_maps.append(pooled_gt[bi, 0].detach().cpu())
 
             if batch_idx % log_every == 0:
                 print(
@@ -343,6 +354,17 @@ def _extract_points(
     return np.stack([ys, xs, scores], axis=1).astype(np.float32)
 
 
+def _extract_gt_points(heatmap: torch.Tensor, nms_ksize: int) -> np.ndarray:
+    pts = _extract_points(
+        heatmap.float(),
+        threshold=0.5,
+        nms_ksize=nms_ksize,
+        max_preds=0,
+        min_distance=0.0,
+    )
+    return pts[:, :2] if pts.size else np.empty((0, 2), dtype=np.float32)
+
+
 def _match_points(pred_yx: np.ndarray, gt_yx: np.ndarray, dist_thr: float) -> Tuple[int, int, int, float]:
     if pred_yx.shape[0] == 0:
         return 0, 0, int(gt_yx.shape[0]), 0.0
@@ -376,6 +398,7 @@ def evaluate_detection(
     max_preds: int,
     bev_cell_m: float,
     min_distance: float,
+    moda_dist_m: float,
 ) -> Tuple[List[Dict[str, float]], Dict[str, float]]:
     rows: List[Dict[str, float]] = []
     if len(pred_maps) != len(gt_maps):
@@ -386,6 +409,7 @@ def evaluate_detection(
         fp = 0
         fn = 0
         dist_sum = 0.0
+        moda_rows: List[Dict[str, float]] = []
 
         for pred_map, gt_map in zip(pred_maps, gt_maps):
             pred_pts = _extract_points(
@@ -397,19 +421,27 @@ def evaluate_detection(
             )
             pred_yx = pred_pts[:, :2] if pred_pts.size else np.empty((0, 2), dtype=np.float32)
 
-            gt_yx = torch.nonzero(gt_map > 0, as_tuple=False).cpu().numpy().astype(np.float32)
+            gt_yx = _extract_gt_points(gt_map, nms_ksize=nms_ksize)
 
             c_tp, c_fp, c_fn, c_dist = _match_points(pred_yx=pred_yx, gt_yx=gt_yx, dist_thr=dist_thr)
             tp += c_tp
             fp += c_fp
             fn += c_fn
             dist_sum += c_dist
+            moda_rows.append(
+                compute_moda_modp(
+                    pred_pts=pred_yx * bev_cell_m,
+                    gt_pts=gt_yx * bev_cell_m,
+                    d_thresh=moda_dist_m,
+                )
+            )
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
         loc_err_px = dist_sum / tp if tp > 0 else float("nan")
         loc_err_m = loc_err_px * bev_cell_m if np.isfinite(loc_err_px) else float("nan")
+        moda_metrics = aggregate_metrics(moda_rows)
 
         rows.append(
             {
@@ -422,6 +454,12 @@ def evaluate_detection(
                 "f1": float(f1),
                 "loc_err_px": float(loc_err_px),
                 "loc_err_m": float(loc_err_m),
+                "moda": float(moda_metrics["moda"]),
+                "modp": float(moda_metrics["modp"]),
+                "moda_tp": float(moda_metrics["tp"]),
+                "moda_fp": float(moda_metrics["fp"]),
+                "moda_fn": float(moda_metrics["fn"]),
+                "moda_n_gt": float(moda_metrics["n_gt"]),
             }
         )
 
@@ -433,15 +471,18 @@ def _print_detection_table(rows: Sequence[Dict[str, float]], best_threshold: flo
     print("\n" + "=" * 56)
     print("Detection Sweep (BEV)")
     print("=" * 56)
-    print("thr      precision  recall     f1         loc_err(m)")
+    print("thr      precision  recall     f1         moda       modp(m)    loc_err(m)")
     for row in rows:
         mark = "*" if abs(row["threshold"] - best_threshold) < 1e-12 else " "
         loc_m = "nan" if not np.isfinite(row["loc_err_m"]) else f"{row['loc_err_m']:.4f}"
+        modp = "nan" if not np.isfinite(row["modp"]) else f"{row['modp']:.4f}"
         print(
             f"{mark}{row['threshold']:<8.2f} "
             f"{row['precision']:<10.4f} "
             f"{row['recall']:<10.4f} "
             f"{row['f1']:<10.4f} "
+            f"{row['moda']:<10.4f} "
+            f"{modp:<10} "
             f"{loc_m}"
         )
     print("=" * 56)
@@ -531,12 +572,13 @@ def main() -> Dict[str, float]:
         feat_hw=feat_hw,
         device=dev,
         pretrained=False,
+        backbone=args.backbone,
         feat_ch=DEFAULT_FEAT_CH,
         add_coord=True,
         fusion_mode=args.fusion_mode,
     )
     _load_model_weights(model, model_path, dev)
-    print(f"[MODEL] loaded weights from {model_path} fusion_mode={args.fusion_mode}")
+    print(f"[MODEL] loaded weights from {model_path} backbone={args.backbone} fusion_mode={model.fusion_mode}")
 
     map_kernel = build_gaussian_kernel_2d(args.map_ksize, args.map_sigma, device=dev)
     img_kernel = build_gaussian_kernel_2d(args.img_ksize, args.img_sigma, device=dev)
@@ -580,6 +622,7 @@ def main() -> Dict[str, float]:
         "det_nms_ksize": int(args.det_nms_ksize),
         "det_max_preds": int(args.det_max_preds),
         "det_dist_thr": float(args.det_dist_thr),
+        "det_moda_dist_m": float(args.det_moda_dist_m),
         "det_thresholds": args.det_thresholds,
     }
     output_payload: Dict[str, object] = {**final_metrics, **extraction_config, "extraction_config": extraction_config}
@@ -596,6 +639,7 @@ def main() -> Dict[str, float]:
             max_preds=args.det_max_preds,
             bev_cell_m=bev_cell_m,
             min_distance=args.det_min_distance,
+            moda_dist_m=args.det_moda_dist_m,
         )
         _print_detection_table(rows, best_threshold=best["threshold"])
 
@@ -605,6 +649,8 @@ def main() -> Dict[str, float]:
             f"precision={best['precision']:.4f}, "
             f"recall={best['recall']:.4f}, "
             f"f1={best['f1']:.4f}, "
+            f"moda={best['moda']:.4f}, "
+            f"modp={best['modp']:.4f}, "
             f"loc_err_m={best['loc_err_m']:.4f}"
         )
 
@@ -614,10 +660,17 @@ def main() -> Dict[str, float]:
                 "det_precision": float(best["precision"]),
                 "det_recall": float(best["recall"]),
                 "det_f1": float(best["f1"]),
+                "det_moda": float(best["moda"]),
+                "det_modp": float(best["modp"]),
+                "det_moda_dist_m": float(args.det_moda_dist_m),
                 "det_loc_err_m": float(best["loc_err_m"]),
                 "det_tp": float(best["tp"]),
                 "det_fp": float(best["fp"]),
                 "det_fn": float(best["fn"]),
+                "det_moda_tp": float(best["moda_tp"]),
+                "det_moda_fp": float(best["moda_fp"]),
+                "det_moda_fn": float(best["moda_fn"]),
+                "det_moda_n_gt": float(best["moda_n_gt"]),
             }
         )
         output_payload.update(final_metrics)

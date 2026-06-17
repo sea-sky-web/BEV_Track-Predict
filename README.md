@@ -47,11 +47,14 @@ python src/train_main.py --data_root wildtrack --device cuda
 - `--max_frames`：默认 `-1`，表示使用全部帧；可设为小正数进行 smoke test
 - `--batch`：默认 `1`
 - `--bev_down`：默认 `4`
-- `--pretrained true|false` / `--no-pretrained`：默认使用 ImageNet 预训练 ResNet-50 backbone
+- `--backbone`：默认 `resnet18`；`resnet50` 保留为 legacy 复现实验
+- `--pretrained true|false` / `--no-pretrained`：默认使用 ImageNet 预训练 backbone
+- `--fusion_mode`：默认 `confidence_v2`；`concat` 和 `confidence_v1` 保留为对照/legacy
 - `--optimizer`：默认 `adam`；`sgd` 保留给 legacy 复现实验
 - `--scheduler`：默认 `cosine`；`onecycle` 保留给 legacy 复现实验
 - `--lr_init` / `--weight_decay`：Adam 默认分别为 `1e-4` / `1e-4`
 - `--freeze_backbone_epochs`：默认 `3`，前 3 个 epoch 冻结共享 image backbone
+- `--augment true|false` / `--no-augment`：默认启用颜色抖动；水平翻转默认 `0.0`
 - `--amp`：启用自动混合精度（仅 `cuda` 时有效）
 - `--drop_bad_views`：丢弃投影 `valid_ratio` 低于阈值的视角
 - `--valid_thr`：默认 `0.05`
@@ -76,13 +79,26 @@ python src/train_main.py --data_root wildtrack --device cuda
 python src/evaluate_main.py --data_root wildtrack --views 0,1,2,3,4,5,6 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda
 ```
 
-如需做“检测级”评估（阈值扫描 + Precision/Recall/F1 + 定位误差），可直接启用：
+如需做“检测级”评估（阈值扫描 + Precision/Recall/F1 + MODA/MODP + 定位误差），可直接启用：
 
 ```bash
-python src/evaluate_main.py --data_root wildtrack --views 1,2 --drop_bad_views --valid_thr 0.15 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda --frame_start 300 --max_frames 100 --report_detection --metrics_out outputs/eval_metrics.json
+python src/evaluate_main.py --data_root wildtrack --views 0,1,2,3,4,5,6 --backbone resnet18 --fusion_mode confidence_v2 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda --report_detection --metrics_out outputs/eval_metrics.json
 ```
 
 该脚本与 `src/train_main.py` 使用相同的投影与数据构建链路，输出 `loss/bev_loss/img_loss/pos_mse/aux_pos_mse` 以及模型参数统计。
+
+几何和融合可视化需要真实 WildTrack 数据与 checkpoint：
+
+```bash
+python scripts/visualize_projection.py --data_root wildtrack --views 0,1,2,3,4,5,6
+python scripts/visualize_fusion_weights.py --data_root wildtrack --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth
+```
+
+无数据快速验证可运行：
+
+```bash
+PYTHONPATH=src pytest tests/test_geometry.py tests/test_metrics.py tests/test_augmentation.py tests/test_smoke_forward.py -v
+```
 
 ## 历史探索归档
 
@@ -97,6 +113,7 @@ python src/evaluate_main.py --data_root wildtrack --views 1,2 --drop_bad_views -
 
 - 数据加载与标签生成：`src/dataset.py`
 - 标定与投影相关：`src/calibration.py`
+- MODA/MODP 与检测统计：`src/metrics.py`
 - 网络结构：`src/models.py`
 - 训练循环与检查点：`src/trainer.py`
 - 主训练脚本/参数入口：`src/train_main.py`

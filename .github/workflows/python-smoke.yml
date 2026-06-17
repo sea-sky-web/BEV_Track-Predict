@@ -18,7 +18,17 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy Pillow opencv-python matplotlib pyyaml scipy pytest
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
       - name: Syntax Check
         run: |
-          python -m py_compile run_colab_training.py
-          python -m compileall src
+          PYTHONPYCACHEPREFIX=/tmp/bev_pycache python -m py_compile src/config.py src/augmentation.py src/calibration.py src/dataset.py src/evaluate_main.py src/geometry.py src/loss.py src/metrics.py src/models.py src/train_main.py src/trainer.py src/utils.py scripts/train_main.py scripts/run_colab_exp.py scripts/commit_ai_runs.py scripts/verify_modules.py
+          PYTHONPYCACHEPREFIX=/tmp/bev_pycache python -m compileall src scripts tests
+
+      - name: Forward and metric smoke tests
+        run: |
+          PYTHONPATH=src pytest tests/test_geometry.py tests/test_metrics.py tests/test_augmentation.py tests/test_smoke_forward.py -v --tb=short

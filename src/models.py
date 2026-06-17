@@ -8,9 +8,70 @@ from typing import Literal, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models import ResNet50_Weights, resnet50
+from torchvision.models import ResNet18_Weights, ResNet50_Weights, resnet18, resnet50
 
 from geometry import warp_perspective_torch
+
+BackboneName = Literal["resnet18", "resnet50"]
+FusionMode = Literal["concat", "confidence", "confidence_v1", "confidence_v2"]
+
+
+def normalize_fusion_mode(fusion_mode: str) -> str:
+    """Keep legacy CLI aliases while making the active attention fusion explicit."""
+    if fusion_mode == "confidence":
+        return "confidence_v2"
+    return fusion_mode
+
+
+def _dilate_basic_resnet_layer(layer: nn.Sequential, dilation: int) -> None:
+    """Convert a torchvision ResNet-18 layer to stride-1 dilated blocks."""
+    for block in layer:
+        if hasattr(block, "conv1"):
+            if block.conv1.stride != (1, 1):
+                block.conv1.stride = (1, 1)
+            block.conv1.dilation = (dilation, dilation)
+            block.conv1.padding = (dilation, dilation)
+        if hasattr(block, "conv2"):
+            block.conv2.dilation = (dilation, dilation)
+            block.conv2.padding = (dilation, dilation)
+        if getattr(block, "downsample", None) is not None:
+            conv = block.downsample[0]
+            if hasattr(conv, "stride") and conv.stride != (1, 1):
+                conv.stride = (1, 1)
+
+
+class ResNet18Stride8Trunk(nn.Module):
+    """
+    ResNet-18 backbone with stride-8 output, matching the MVDet-style lightweight encoder.
+    """
+
+    def __init__(self, pretrained: bool = True, out_ch: int = 512):
+        super().__init__()
+        if out_ch != 512:
+            raise ValueError("ResNet18Stride8Trunk currently outputs 512 channels; set feat_ch=512.")
+
+        weights = ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
+        m = resnet18(weights=weights)
+
+        # ResNet-18 uses BasicBlock, so torchvision's replace_stride_with_dilation
+        # path is not available. Patch layer3/layer4 after construction.
+        _dilate_basic_resnet_layer(m.layer3, dilation=2)
+        _dilate_basic_resnet_layer(m.layer4, dilation=4)
+
+        self.stem = nn.Sequential(m.conv1, m.bn1, m.relu, m.maxpool)
+        self.layer1 = m.layer1
+        self.layer2 = m.layer2
+        self.layer3 = m.layer3
+        self.layer4 = m.layer4
+        self.reduce = nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.stem(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        return self.reduce(x)
 
 
 class ResNet50Stride8Trunk(nn.Module):
@@ -204,12 +265,39 @@ class SpatialAwareConfidenceFusion(nn.Module):
         return (weights * feats_bev).sum(dim=1)
 
 
+class ConcatAttentionFusion(nn.Module):
+    """Predict per-view BEV weights from the joint multi-view representation."""
+
+    def __init__(self, num_views: int, feat_ch: int):
+        super().__init__()
+        self.num_views = num_views
+        self.joint_compress = nn.Sequential(
+            nn.Conv2d(num_views * feat_ch, feat_ch, 1),
+            nn.ReLU(inplace=True),
+        )
+        self.weight_head = nn.Conv2d(feat_ch, num_views, 1)
+        self.latest_weights = None
+
+    def forward(self, feats_bev: torch.Tensor) -> torch.Tensor:
+        if feats_bev.ndim != 5:
+            raise ValueError(f"Expected (B,V,C,H,W) BEV features, got {tuple(feats_bev.shape)}")
+        b, v, c, h, w = feats_bev.shape
+        if v != self.num_views:
+            raise ValueError(f"Expected {self.num_views} views, got {v}")
+
+        joint = feats_bev.reshape(b, v * c, h, w)
+        joint = self.joint_compress(joint)
+        weights = torch.softmax(self.weight_head(joint), dim=1)
+        self.latest_weights = weights.detach()
+        return (feats_bev * weights.unsqueeze(2)).sum(dim=1)
+
+
 class MVDetLikeNet(nn.Module):
     """
     MVDet 风格的多视角 BEV 检测网络
     
     架构：
-    1. 多视角特征提取：ResNet50 主干 × V 视角
+    1. 多视角特征提取：ResNet-18/ResNet-50 共享主干 × V 视角
     2. 单视角预测：head/foot 热图预测（辅助任务）
     3. 投影与融合：透视变换投影到 BEV + 拼接
     4. BEV 预测：融合后的特征预测 BEV 热图
@@ -219,7 +307,7 @@ class MVDetLikeNet(nn.Module):
     - imgs_logits: 图像热图 (B, V, 2, Hf, Wf)
     
     Attributes:
-        backbone: 共享的 ResNet50 主干
+        backbone: 共享的 ResNet 主干
         img_head: 图像预测头
         proj_mats: 静态投影矩阵 buffer
         coord: 静态坐标编码 buffer（可选）
@@ -234,8 +322,9 @@ class MVDetLikeNet(nn.Module):
         feat_hw: Tuple[int, int],
         feat_ch: int = 512,
         pretrained: bool = True,
+        backbone: BackboneName = "resnet18",
         add_coord: bool = True,
-        fusion_mode: Literal["concat", "confidence"] = "concat",
+        fusion_mode: FusionMode = "confidence_v2",
     ):
         """
         初始化 MVDetLikeNet
@@ -247,21 +336,29 @@ class MVDetLikeNet(nn.Module):
             feat_hw: 特征平面大小 (Hf, Wf)
             feat_ch: 特征通道数，默认 512
             pretrained: 是否加载预训练权重，默认 True
+            backbone: 主干网络，resnet18 默认，resnet50 保留 legacy 复现实验
             add_coord: 是否添加坐标编码，默认 True
-            fusion_mode: BEV 融合模式，concat 保留 baseline，confidence 启用空间置信度融合
+            fusion_mode: concat、confidence_v1 或 confidence_v2
         """
         super().__init__()
-        if fusion_mode not in {"concat", "confidence"}:
+        fusion_mode = normalize_fusion_mode(fusion_mode)
+        if fusion_mode not in {"concat", "confidence_v1", "confidence_v2"}:
             raise ValueError(f"Unsupported fusion_mode: {fusion_mode}")
+        if backbone not in {"resnet18", "resnet50"}:
+            raise ValueError(f"Unsupported backbone: {backbone}")
         
         self.V = num_views
         self.Hb, self.Wb = reduced_hw
         self.Hf, self.Wf = feat_hw
         self.add_coord = add_coord
         self.fusion_mode = fusion_mode
+        self.backbone_name = backbone
         
         # 共享的特征提取主干
-        self.backbone = ResNet50Stride8Trunk(pretrained=pretrained, out_ch=feat_ch)
+        if backbone == "resnet18":
+            self.backbone = ResNet18Stride8Trunk(pretrained=pretrained, out_ch=feat_ch)
+        else:
+            self.backbone = ResNet50Stride8Trunk(pretrained=pretrained, out_ch=feat_ch)
         
         # 单视角预测头
         self.img_head = ImgHeadFoot(in_ch=feat_ch, mid_ch=128)
@@ -273,9 +370,12 @@ class MVDetLikeNet(nn.Module):
         if fusion_mode == "concat":
             in_bev = num_views * feat_ch
             self.confidence_fusion = None
-        else:
+        elif fusion_mode == "confidence_v1":
             in_bev = feat_ch
             self.confidence_fusion = SpatialAwareConfidenceFusion(feat_ch=feat_ch)
+        else:
+            in_bev = feat_ch
+            self.confidence_fusion = ConcatAttentionFusion(num_views=num_views, feat_ch=feat_ch)
         
         # 可选的坐标编码
         if add_coord:
@@ -363,9 +463,10 @@ def create_model(
     feat_hw: Tuple[int, int],
     device: torch.device,
     pretrained: bool = True,
+    backbone: BackboneName = "resnet18",
     feat_ch: int = 512,
     add_coord: bool = True,
-    fusion_mode: Literal["concat", "confidence"] = "concat",
+    fusion_mode: FusionMode = "confidence_v2",
 ) -> MVDetLikeNet:
     """
     工厂函数：创建完整的 MVDetLikeNet 模型
@@ -377,6 +478,7 @@ def create_model(
         feat_hw: 特征平面大小
         device: 计算设备
         pretrained: 是否加载预训练权重
+        backbone: 主干网络
         feat_ch: 特征通道数
         add_coord: 是否添加坐标编码
         fusion_mode: BEV 融合模式
@@ -401,6 +503,7 @@ def create_model(
         feat_hw=feat_hw,
         feat_ch=feat_ch,
         pretrained=pretrained,
+        backbone=backbone,
         add_coord=add_coord,
         fusion_mode=fusion_mode,
     ).to(device)

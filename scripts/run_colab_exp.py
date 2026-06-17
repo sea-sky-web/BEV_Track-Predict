@@ -81,6 +81,19 @@ def _float_flag_value(command: list[str], flag: str, default: Any = None) -> Any
         return default
 
 
+def _bool_value(raw: Any, default: Any = None) -> Any:
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return raw
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return raw
+
+
 def _append_float_override(
     command: list[str],
     cfg: dict[str, Any],
@@ -167,18 +180,9 @@ def build_experiment_config(
     if "--no-pretrained" in train_command:
         pretrained = False
     else:
-        pretrained_raw = _flag_value(train_command, "--pretrained", cfg.get("pretrained"))
-        if pretrained_raw is None:
-            pretrained = None
-        elif isinstance(pretrained_raw, bool):
-            pretrained = pretrained_raw
-        elif str(pretrained_raw).strip().lower() in {"1", "true", "yes", "y", "on"}:
-            pretrained = True
-        elif str(pretrained_raw).strip().lower() in {"0", "false", "no", "n", "off"}:
-            pretrained = False
-        else:
-            pretrained = pretrained_raw
-    fusion_mode = str(_flag_value(train_command, "--fusion_mode", cfg.get("fusion_mode", "concat")))
+        pretrained = _bool_value(_flag_value(train_command, "--pretrained", cfg.get("pretrained")))
+    backbone = str(_flag_value(train_command, "--backbone", cfg.get("backbone", "resnet18")))
+    fusion_mode = str(_flag_value(train_command, "--fusion_mode", cfg.get("fusion_mode", "confidence_v2")))
     optimizer = str(_flag_value(train_command, "--optimizer", cfg.get("optimizer", "adam")))
     scheduler = str(_flag_value(train_command, "--scheduler", cfg.get("scheduler", "cosine")))
     lr_init = _float_flag_value(train_command, "--lr_init", cfg.get("lr_init"))
@@ -189,6 +193,18 @@ def build_experiment_config(
         train_command,
         "--freeze_backbone_epochs",
         cfg.get("freeze_backbone_epochs"),
+    )
+    augment = False if "--no-augment" in train_command else _bool_value(
+        _flag_value(train_command, "--augment", cfg.get("augment")),
+        default=None,
+    )
+    augment_hflip_prob = _float_flag_value(
+        train_command,
+        "--augment_hflip_prob",
+        cfg.get("augment_hflip_prob"),
+    )
+    augment_color_jitter = str(
+        _flag_value(train_command, "--augment_color_jitter", cfg.get("augment_color_jitter", ""))
     )
     alpha = _float_flag_value(train_command, "--alpha", None)
     if alpha is None:
@@ -211,7 +227,11 @@ def build_experiment_config(
         "epochs": epochs,
         "batch_size": batch_size,
         "pretrained": pretrained,
+        "backbone": backbone,
         "fusion_mode": fusion_mode,
+        "augment": augment,
+        "augment_hflip_prob": augment_hflip_prob,
+        "augment_color_jitter": augment_color_jitter,
         "optimizer": optimizer,
         "scheduler": scheduler,
         "lr_init": lr_init,
@@ -223,6 +243,7 @@ def build_experiment_config(
         "loss_config": loss_config,
         "train_command": train_command,
         "checkpoint_path": resolve_checkpoint_path(cfg, train_command, train_log),
+        "det_moda_dist_m": _float_flag_value(train_command, "--det_moda_dist_m", cfg.get("det_moda_dist_m")),
         "metrics_sources": ["actual_metrics.json", "eval_metrics.json", "metrics_raw.json"],
     }
 
@@ -259,9 +280,25 @@ def main() -> int:
         train_command, cfg,
         flag="--pretrained", cfg_key="pretrained", env_key="PRETRAINED",
     )
-    fusion_mode = str(os.environ.get("FUSION_MODE") or cfg.get("fusion_mode", "concat")).strip().lower()
+    _append_value_override(
+        train_command, cfg,
+        flag="--backbone", cfg_key="backbone", env_key="BACKBONE",
+    )
+    fusion_mode = str(os.environ.get("FUSION_MODE") or cfg.get("fusion_mode", "confidence_v2")).strip().lower()
     if "--fusion_mode" not in train_command:
         train_command.extend(["--fusion_mode", fusion_mode])
+    _append_value_override(
+        train_command, cfg,
+        flag="--augment", cfg_key="augment", env_key="AUGMENT",
+    )
+    _append_float_override(
+        train_command, cfg,
+        flag="--augment_hflip_prob", cfg_key="augment_hflip_prob", env_key="AUGMENT_HFLIP_PROB",
+    )
+    _append_value_override(
+        train_command, cfg,
+        flag="--augment_color_jitter", cfg_key="augment_color_jitter", env_key="AUGMENT_COLOR_JITTER",
+    )
     _append_value_override(
         train_command, cfg,
         flag="--optimizer", cfg_key="optimizer", env_key="OPTIMIZER",
@@ -358,7 +395,11 @@ def main() -> int:
         "views": experiment_config["views"],
         "max_frames": experiment_config["max_frames"],
         "pretrained": experiment_config["pretrained"],
+        "backbone": experiment_config["backbone"],
         "fusion_mode": experiment_config["fusion_mode"],
+        "augment": experiment_config["augment"],
+        "augment_hflip_prob": experiment_config["augment_hflip_prob"],
+        "augment_color_jitter": experiment_config["augment_color_jitter"],
         "optimizer": experiment_config["optimizer"],
         "scheduler": experiment_config["scheduler"],
         "lr_init": experiment_config["lr_init"],
@@ -367,6 +408,7 @@ def main() -> int:
         "weight_decay": experiment_config["weight_decay"],
         "freeze_backbone_epochs": experiment_config["freeze_backbone_epochs"],
         "alpha": experiment_config["alpha"],
+        "det_moda_dist_m": experiment_config["det_moda_dist_m"],
         "checkpoint_path": experiment_config["checkpoint_path"],
         "actual_metrics": actual_metrics,
         "log_path": str(train_log),

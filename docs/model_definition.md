@@ -98,7 +98,7 @@ The current model architecture is:
 
 ```text
 Multi-view images
-→ shared image encoder
+→ shared ResNet-18 image encoder by default
 → per-view image features
 → geometry-based BEV projection
 → spatial-aware multi-view confidence fusion
@@ -111,6 +111,9 @@ This architecture must remain MVDet-style and geometry-guided.
 
 The current model must not be replaced by BEVFormer, PETR, LSS, or other large autonomous-driving BEV frameworks.
 
+The default backbone is stride-8 ResNet-18 with ImageNet weights. ResNet-50
+remains available only as a legacy explicit option.
+
 ---
 
 ## 7. Fixed Model Improvement
@@ -119,9 +122,11 @@ The only model-level improvement defined in the current stage is:
 
 > Spatial-aware multi-view confidence fusion.
 
-The baseline fusion is naive multi-view BEV fusion.
+The baseline fusion is naive multi-view BEV concatenation.
 
-The improved fusion learns spatially varying view confidence weights in BEV space.
+The improved default fusion is `confidence_v2`, which predicts per-view
+BEV-space attention weights from the joint multi-view representation. The
+legacy per-view confidence module remains available as `confidence_v1`.
 
 The fusion input is:
 
@@ -169,6 +174,8 @@ The model must be evaluated with BEV detection metrics, including:
 - Precision.
 - Recall.
 - F1 score.
+- MODA.
+- MODP.
 - Localization error.
 
 Training loss alone is not a valid success criterion.
@@ -202,6 +209,6 @@ The current model is considered valid only if it can:
 3. Construct BEV features using camera projection.
 4. Predict BEV pedestrian occupancy heatmaps.
 5. Extract BEV pedestrian point detections.
-6. Report Precision, Recall, F1 score, and localization error.
+6. Report Precision, Recall, F1 score, MODA, MODP, and localization error.
 7. Compare naive fusion with spatial-aware confidence fusion.
 8. Save metrics for experiment comparison.

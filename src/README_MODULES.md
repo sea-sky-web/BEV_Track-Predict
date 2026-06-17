@@ -11,8 +11,10 @@
 ```
 src/
 ├── config.py
+├── augmentation.py
 ├── utils.py
 ├── loss.py
+├── metrics.py
 ├── calibration.py
 ├── geometry.py
 ├── models.py
@@ -25,14 +27,16 @@ src/
 ## 职责概览
 
 - `config.py`：常量与默认超参数（数据、模型、优化器、训练策略）。
+- `augmentation.py`：训练期视图一致增强；默认启用颜色抖动，水平翻转默认关闭。
 - `calibration.py`：标定读取、单位推断、内参缩放、标定缓存。
 - `geometry.py`：投影矩阵构建、有效性评估、透视变换实现。
 - `dataset.py`：Wildtrack 多视角样本读取与 GT（BEV + per-view）构建。
 - `models.py`：MVDetLikeNet（共享 backbone + per-view 辅助头 + BEV 融合头）。
 - `loss.py`：`GaussianMSE`（主损失）及可选扩展版本。
+- `metrics.py`：BEV 点检测的 MODA/MODP 与聚合统计。
 - `trainer.py`：训练循环、指标统计、checkpoint 管理。
 - `train_main.py`：训练配置编排与流程执行。
-- `evaluate_main.py`：离线评估，复用与训练一致的数据/投影链路；支持检测级评估（阈值扫描、Precision/Recall/F1、定位误差）与 `frame_start` 帧切片。
+- `evaluate_main.py`：离线评估，复用与训练一致的数据/投影链路；支持检测级评估（阈值扫描、Precision/Recall/F1、MODA/MODP、定位误差）与 `frame_start` 帧切片。
 - `utils.py`：热图保存与高斯核构建等通用函数。
 
 ## 依赖方向

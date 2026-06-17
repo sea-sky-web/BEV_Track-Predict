@@ -5,6 +5,11 @@
 ## 活动入口
 - `verify_modules.py`：对 `src/` 模块进行导入与接口完整性检查。
 - `calibration.py`：标定相关的独立工具模块（保留为可复用脚本）。
+- `train_main.py`：兼容入口，路由到 `src/train_main.py`。
+- `run_colab_exp.py`：Colab 实验 launcher，写出 metrics/config 记录。
+- `commit_ai_runs.py`：整理并提交 Colab 运行结果到 `ai_runs/`。
+- `visualize_projection.py`：基于真实 WildTrack 数据生成投影覆盖 overlay。
+- `visualize_fusion_weights.py`：基于真实 checkpoint 导出 `confidence_v2` per-view 权重热图。
 
 ## 已归档历史探索
 以下历史训练原型已迁移到：
@@ -27,3 +32,5 @@
 请使用：
 - `src/train_main.py`（训练）
 - `src/evaluate_main.py`（评估）
+
+当前默认链路为 ResNet-18 pretrained backbone、`confidence_v2` fusion、Adam + cosine、全 7 视角、全帧训练。

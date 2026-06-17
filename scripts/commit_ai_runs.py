@@ -65,6 +65,8 @@ def metric_summary(metrics: dict[str, Any]) -> dict[str, Any]:
         "Precision": _metric(metrics, "det_precision"),
         "Recall": _metric(metrics, "det_recall"),
         "F1": _metric(metrics, "det_f1"),
+        "MODA": _metric(metrics, "det_moda"),
+        "MODP": _metric(metrics, "det_modp"),
         "Localization error": _metric(metrics, "det_loc_err_m"),
         "False positives": _metric(metrics, "det_fp"),
         "Missed detections": _metric(metrics, "det_fn"),
@@ -90,7 +92,11 @@ def build_ai_context(
     views = exp_cfg.get("views", current_metrics.get("views", "Unavailable"))
     max_frames = exp_cfg.get("max_frames", current_metrics.get("max_frames", "Unavailable"))
     pretrained = exp_cfg.get("pretrained", current_metrics.get("pretrained", "Unavailable"))
-    fusion_mode = exp_cfg.get("fusion_mode", current_metrics.get("fusion_mode", "concat"))
+    backbone = exp_cfg.get("backbone", current_metrics.get("backbone", "Unavailable"))
+    fusion_mode = exp_cfg.get("fusion_mode", current_metrics.get("fusion_mode", "confidence_v2"))
+    augment = exp_cfg.get("augment", current_metrics.get("augment", "Unavailable"))
+    augment_hflip_prob = exp_cfg.get("augment_hflip_prob", current_metrics.get("augment_hflip_prob", "Unavailable"))
+    augment_color_jitter = exp_cfg.get("augment_color_jitter", current_metrics.get("augment_color_jitter", "Unavailable"))
     optimizer = exp_cfg.get("optimizer", current_metrics.get("optimizer", "Unavailable"))
     scheduler = exp_cfg.get("scheduler", current_metrics.get("scheduler", "Unavailable"))
     lr_init = exp_cfg.get("lr_init", current_metrics.get("lr_init", "Unavailable"))
@@ -110,6 +116,8 @@ def build_ai_context(
     current_f1 = _metric(current_metrics, "det_f1")
     current_precision = _metric(current_metrics, "det_precision")
     current_recall = _metric(current_metrics, "det_recall")
+    current_moda = _metric(current_metrics, "det_moda")
+    current_modp = _metric(current_metrics, "det_modp")
     current_fp = _metric(current_metrics, "det_fp")
     current_fn = _metric(current_metrics, "det_fn")
 
@@ -117,6 +125,7 @@ def build_ai_context(
         observed_problem = (
             "Training and evaluation completed, but the detection result is weak: "
             f"F1={_fmt(current_f1)}, precision={_fmt(current_precision)}, recall={_fmt(current_recall)}, "
+            f"MODA={_fmt(current_moda)}, MODP={_fmt(current_modp)}, "
             f"false positives={_fmt(current_fp)}, missed detections={_fmt(current_fn)}."
         )
         interpretation = "Inconclusive. This run is a baseline measurement until a same-configuration comparison exists."
@@ -132,6 +141,8 @@ def build_ai_context(
         "Precision: Unavailable\n"
         "Recall: Unavailable\n"
         "F1: Unavailable\n"
+        "MODA: Unavailable\n"
+        "MODP: Unavailable\n"
         "Localization error: Unavailable\n"
         "False positives: Unavailable\n"
         "Missed detections: Unavailable"
@@ -176,9 +187,9 @@ expecting the resulting metrics to show whether ImageNet initialization and full
 ## 6. Changes Made
 
 Changed files:
-- Run configuration: recorded pretrained status, optimizer, scheduler, learning rates, freeze_backbone_epochs, views, and max_frames.
+- Run configuration: recorded backbone, pretrained status, optimizer, scheduler, augmentation, learning rates, freeze_backbone_epochs, views, and max_frames.
 - scripts/run_colab_exp.py: prepared metrics.json with comparison-critical training defaults.
-- scripts/commit_ai_runs.py: recorded comparison-critical training defaults in ai_context.md.
+- scripts/commit_ai_runs.py: recorded comparison-critical training defaults and MODA/MODP in ai_context.md.
 
 ## 7. Training Configuration
 
@@ -192,7 +203,11 @@ device: Unavailable
 seed: Unavailable
 checkpoint_path: {_fmt(checkpoint_path)}
 pretrained: {_fmt(pretrained)}
+backbone: {_fmt(backbone)}
 fusion_mode: {_fmt(fusion_mode)}
+augment: {_fmt(augment)}
+augment_hflip_prob: {_fmt(augment_hflip_prob)}
+augment_color_jitter: {_fmt(augment_color_jitter)}
 optimizer: {_fmt(optimizer)}
 scheduler: {_fmt(scheduler)}
 max_lr: {_fmt(max_lr)}
@@ -212,6 +227,7 @@ model_path: {_fmt(checkpoint_path)}
 views: {_fmt(views)}
 threshold: {_fmt(_metric(current_metrics, 'det_best_threshold'))}
 distance_threshold: {_fmt(_extract_cfg('det_dist_thr'))}
+moda_distance_threshold_m: {_fmt(_extract_cfg('det_moda_dist_m'))}
 min_distance: {_fmt(_extract_cfg('det_min_distance'))}
 nms_ksize: {_fmt(_extract_cfg('det_nms_ksize'))}
 max_preds: {_fmt(_extract_cfg('det_max_preds'))}
