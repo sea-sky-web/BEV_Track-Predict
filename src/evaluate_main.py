@@ -37,6 +37,7 @@ from config import (
     DEFAULT_NUM_WORKERS,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_PERSON_H,
+    DEFAULT_VIEWS,
     DEFAULT_VALID_THR,
     IMG_ORI_H,
     IMG_ORI_W,
@@ -54,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     ap.add_argument("--data_root", type=str, default=DEFAULT_DATA_ROOT, help="Wildtrack dataset root")
-    ap.add_argument("--views", type=str, default="0,1,2", help="View IDs, e.g. 0,1,2")
+    ap.add_argument("--views", type=str, default=DEFAULT_VIEWS, help="View IDs, e.g. 0,1,2")
     ap.add_argument("--drop_bad_views", action="store_true", help="Drop views with low valid projection ratio")
     ap.add_argument("--valid_thr", type=float, default=DEFAULT_VALID_THR, help="Projection valid ratio threshold")
 

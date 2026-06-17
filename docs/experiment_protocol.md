@@ -35,11 +35,11 @@ False positives
 Missed detections
 ```
 
-Metric comparisons are valid only when dataset, views, thresholds, distance threshold, auxiliary loss alpha, training loss weights, and BEV point-extraction settings are held consistent.
+Metric comparisons are valid only when dataset, views, max_frames, pretrained backbone status, optimizer, scheduler, thresholds, distance threshold, auxiliary loss alpha, training loss weights, and BEV point-extraction settings are held consistent.
 
 Comparison-critical point-extraction settings include NMS kernel size, minimum peak distance suppression, and maximum predictions per frame.
 
-Comparison-critical training settings include auxiliary loss alpha and BEV/image positive and negative Gaussian MSE loss weights.
+Comparison-critical training settings include pretrained backbone status, optimizer, scheduler, learning rate, weight decay, freeze_backbone_epochs, auxiliary loss alpha, and BEV/image positive and negative Gaussian MSE loss weights.
 
 ---
 
@@ -56,7 +56,7 @@ Recommended evaluation:
 ```bash
 python src/evaluate_main.py \
   --data_root wildtrack \
-  --views 0,1,2 \
+  --views 0,1,2,3,4,5,6 \
   --model_path outputs/model_final.pth \
   --report_detection \
   --metrics_out outputs/eval_metrics.json
@@ -74,6 +74,23 @@ When testing stronger MVDet-style per-view auxiliary supervision, keep all other
 
 ```bash
 ALPHA=2.0 FUSION_MODE=confidence python scripts/run_colab_exp.py
+```
+
+For the current Issue #45 training baseline, the intended Colab defaults are:
+
+```bash
+python scripts/train_main.py \
+  --data_root /content/BEV_Track-Predict/wildtrack \
+  --views 0,1,2,3,4,5,6 \
+  --max_frames -1 \
+  --pretrained true \
+  --fusion_mode confidence \
+  --alpha 1.0 \
+  --optimizer adam \
+  --scheduler cosine \
+  --lr_init 0.0001 \
+  --weight_decay 0.0001 \
+  --freeze_backbone_epochs 3
 ```
 
 ---

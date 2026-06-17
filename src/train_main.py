@@ -13,13 +13,14 @@ from torch.utils.data import DataLoader
 
 from config import (
     DEFAULT_DATA_ROOT, DEFAULT_OUTPUT_DIR,
-    DEFAULT_MAX_FRAMES, DEFAULT_EPOCHS, DEFAULT_BATCH_SIZE,
+    DEFAULT_VIEWS, DEFAULT_MAX_FRAMES, DEFAULT_EPOCHS, DEFAULT_BATCH_SIZE,
     DEFAULT_BEV_DOWN, DEFAULT_FEAT_H, DEFAULT_FEAT_W,
     DEFAULT_IMG_H, DEFAULT_IMG_W, DEFAULT_PERSON_H,
     DEFAULT_ALPHA, DEFAULT_MAP_KSIZE, DEFAULT_MAP_SIGMA,
     DEFAULT_IMG_KSIZE, DEFAULT_IMG_SIGMA, DEFAULT_PRETRAINED,
     DEFAULT_FREEZE_BN, DEFAULT_AMP_ENABLED, DEFAULT_DEVICE,
-    DEFAULT_MAX_LR, DEFAULT_LR_INIT, DEFAULT_MOMENTUM, DEFAULT_WEIGHT_DECAY,
+    DEFAULT_OPTIMIZER, DEFAULT_SCHEDULER, DEFAULT_MAX_LR, DEFAULT_LR_INIT,
+    DEFAULT_MOMENTUM, DEFAULT_WEIGHT_DECAY, DEFAULT_FREEZE_BACKBONE_EPOCHS,
     DEFAULT_NUM_WORKERS, DEFAULT_LOG_EVERY, DEFAULT_VALID_THR, DEFAULT_FEAT_CH,
     CAM_NAMES,
     IMG_ORI_W, IMG_ORI_H,
@@ -32,6 +33,18 @@ from trainer import MVDetTrainer, create_optimizer, create_scheduler
 from utils import build_gaussian_kernel_2d
 
 
+def str2bool(value):
+    """Parse explicit true/false CLI values while keeping --no-pretrained ergonomic."""
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Expected a boolean value, got {value!r}")
+
+
 def parse_args():
     """解析命令行参数"""
     ap = argparse.ArgumentParser(
@@ -41,7 +54,7 @@ def parse_args():
     # 数据相关
     ap.add_argument("--data_root", type=str, default=DEFAULT_DATA_ROOT,
                     help="Wildtrack 数据集根目录")
-    ap.add_argument("--views", type=str, default="0,1,2",
+    ap.add_argument("--views", type=str, default=DEFAULT_VIEWS,
                     help="使用的视角 ID，例如 0,1,2 或 0,3,5")
     ap.add_argument("--drop_bad_views", action="store_true",
                     help="是否丢弃低有效性的视角")
@@ -94,8 +107,19 @@ def parse_args():
                     help="图像热图高斯标准差")
     
     # 优化器和训练策略
-    ap.add_argument("--pretrained", action="store_true", default=DEFAULT_PRETRAINED,
-                    help="是否使用预训练权重")
+    ap.add_argument("--pretrained", nargs="?", const=True, default=DEFAULT_PRETRAINED,
+                    type=str2bool, metavar="{true,false}",
+                    help="是否使用 ImageNet 预训练权重")
+    ap.add_argument("--no-pretrained", dest="pretrained", action="store_false",
+                    help="显式禁用 ImageNet 预训练权重")
+    ap.add_argument("--optimizer", type=str, default=DEFAULT_OPTIMIZER,
+                    choices=["adam", "sgd"],
+                    help="优化器：adam 默认用于小数据预训练微调，sgd 保留 legacy 复现实验")
+    ap.add_argument("--scheduler", type=str, default=DEFAULT_SCHEDULER,
+                    choices=["cosine", "onecycle"],
+                    help="学习率调度器")
+    ap.add_argument("--freeze_backbone_epochs", type=int, default=DEFAULT_FREEZE_BACKBONE_EPOCHS,
+                    help="前 N 个 epoch 冻结 backbone，0 表示不冻结")
     ap.add_argument("--freeze_bn", action="store_true", default=DEFAULT_FREEZE_BN,
                     help="是否冻结 BatchNorm")
     ap.add_argument("--amp", action="store_true", default=DEFAULT_AMP_ENABLED,
@@ -269,12 +293,14 @@ def main():
     
     optimizer = create_optimizer(
         model,
+        optimizer_name=args.optimizer,
         lr=args.lr_init,
         momentum=args.momentum,
         weight_decay=args.weight_decay,
     )
     scheduler = create_scheduler(
         optimizer,
+        scheduler_name=args.scheduler,
         max_lr=args.max_lr,
         epochs=args.epochs,
         steps_per_epoch=len(loader)
@@ -291,10 +317,22 @@ def main():
         output_dir=out_dir,
         amp_enabled=args.amp,
         freeze_bn=args.freeze_bn,
+        freeze_backbone_epochs=args.freeze_backbone_epochs,
         bev_pos_weight=args.bev_pos_weight,
         bev_neg_weight=args.bev_neg_weight,
         img_pos_weight=args.img_pos_weight,
         img_neg_weight=args.img_neg_weight,
+    )
+    print(
+        "[OPT] "
+        f"pretrained={args.pretrained} "
+        f"optimizer={args.optimizer} "
+        f"scheduler={args.scheduler} "
+        f"lr_init={args.lr_init} "
+        f"max_lr={args.max_lr} "
+        f"momentum={args.momentum} "
+        f"weight_decay={args.weight_decay} "
+        f"freeze_backbone_epochs={args.freeze_backbone_epochs}"
     )
     print(
         "[LOSS] "
@@ -318,6 +356,7 @@ def main():
             loader,
             map_kernel,
             img_kernel,
+            epoch=ep,
             alpha=args.alpha,
             log_every=args.log_every,
         )

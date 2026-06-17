@@ -265,7 +265,12 @@ max_frames:
 device:
 seed:
 checkpoint_path:
+pretrained:
 fusion_mode:
+optimizer:
+scheduler:
+weight_decay:
+freeze_backbone_epochs:
 ```
 
 If a training run was not performed, write:
@@ -408,7 +413,10 @@ Recommended structure:
   "previous_iteration": "YYYYMMDD_HHMMSS",
   "dataset": "WildTrack",
   "views": "0,1,2",
+  "pretrained": true,
   "fusion_mode": "confidence",
+  "optimizer": "adam",
+  "scheduler": "cosine",
   "precision": null,
   "recall": null,
   "f1": null,
@@ -522,6 +530,8 @@ Metric comparison is valid only when the following are consistent:
 dataset
 views
 max_frames
+pretrained status
+optimizer and scheduler
 checkpoint selection rule
 evaluation threshold
 distance threshold

@@ -46,6 +46,7 @@ class MVDetTrainer:
         output_dir: Path,
         amp_enabled: bool = False,
         freeze_bn: bool = False,
+        freeze_backbone_epochs: int = 0,
         bev_pos_weight: float = 1.0,
         bev_neg_weight: float = 1.0,
         img_pos_weight: float = 1.0,
@@ -62,6 +63,7 @@ class MVDetTrainer:
             output_dir: 输出目录（保存检查点、日志等）
             amp_enabled: 是否启用自动混合精度
             freeze_bn: 是否冻结 BatchNorm 层
+            freeze_backbone_epochs: 前多少个 epoch 冻结 backbone
             bev_pos_weight: BEV 热图正样本损失权重
             bev_neg_weight: BEV 热图负样本损失权重
             img_pos_weight: 图像热图正样本损失权重
@@ -103,6 +105,10 @@ class MVDetTrainer:
         )
         self.amp_enabled = amp_enabled and device.type == "cuda"
         self.freeze_bn = freeze_bn
+        if freeze_backbone_epochs < 0:
+            raise ValueError(f"freeze_backbone_epochs must be >= 0, got {freeze_backbone_epochs}")
+        self.freeze_backbone_epochs = freeze_backbone_epochs
+        self._backbone_is_frozen = False
         
         # 冻结 BatchNorm
         if self.freeze_bn:
@@ -118,12 +124,38 @@ class MVDetTrainer:
                 m.eval()
                 for p in m.parameters():
                     p.requires_grad_(False)
+
+    def _set_backbone_trainable(self, trainable: bool) -> None:
+        """Toggle the shared image encoder while keeping optimizer groups stable."""
+        backbone = getattr(self.model, "backbone", None)
+        if backbone is None:
+            return
+        for p in backbone.parameters():
+            p.requires_grad_(trainable)
+        if trainable:
+            backbone.train()
+        else:
+            backbone.eval()
+        self._backbone_is_frozen = not trainable
+
+    def _apply_backbone_freeze(self, epoch: int) -> None:
+        should_freeze = epoch < self.freeze_backbone_epochs
+        changed = should_freeze != self._backbone_is_frozen
+        if should_freeze:
+            # model.train() is called at each epoch, so re-apply eval/grad state.
+            self._set_backbone_trainable(False)
+        elif changed:
+            self._set_backbone_trainable(not should_freeze)
+        if changed:
+            state = "frozen" if should_freeze else "trainable"
+            print(f"[TRAIN] backbone={state} epoch={epoch} freeze_backbone_epochs={self.freeze_backbone_epochs}")
     
     def train_epoch(
         self,
         train_loader: DataLoader,
         map_kernel: torch.Tensor,
         img_kernel: torch.Tensor,
+        epoch: int = 0,
         alpha: float = 1.0,
         log_every: int = 20,
     ) -> Dict[str, float]:
@@ -146,6 +178,7 @@ class MVDetTrainer:
                 - "aux_pos_mse": 辅助正样本 MSE
         """
         self.model.train()
+        self._apply_backbone_freeze(epoch)
         # model.train() 会把 BN 重新切回训练态，这里再次冻结确保语义稳定
         if self.freeze_bn:
             self._freeze_bn()
@@ -392,51 +425,89 @@ class MVDetTrainer:
 
 def create_optimizer(
     model: nn.Module,
+    optimizer_name: str = "adam",
     lr: float = 1e-3,
     momentum: float = 0.5,
     weight_decay: float = 5e-4,
-) -> torch.optim.SGD:
+) -> torch.optim.Optimizer:
     """
-    创建 SGD 优化器
+    创建优化器，并给 backbone 使用 0.1x 学习率。
     
     Args:
         model: 模型
+        optimizer_name: adam 或 sgd
         lr: 初始学习率
         momentum: 动量
         weight_decay: 权重衰减
         
     Returns:
-        torch.optim.SGD: 优化器
+        torch.optim.Optimizer: 优化器
     """
-    return torch.optim.SGD(
-        model.parameters(),
-        lr=lr,
-        momentum=momentum,
-        weight_decay=weight_decay
-    )
+    optimizer_name = optimizer_name.lower()
+    backbone = getattr(model, "backbone", None)
+    backbone_ids = set()
+    param_groups = []
+
+    if backbone is not None:
+        backbone_params = [p for p in backbone.parameters() if p.requires_grad]
+        backbone_ids = {id(p) for p in backbone.parameters()}
+        if backbone_params:
+            param_groups.append({"name": "backbone", "params": backbone_params, "lr": lr * 0.1})
+
+    head_params = [p for p in model.parameters() if id(p) not in backbone_ids and p.requires_grad]
+    if head_params:
+        param_groups.append({"name": "head", "params": head_params, "lr": lr})
+
+    if not param_groups:
+        raise ValueError("No trainable parameters found for optimizer")
+
+    if optimizer_name == "adam":
+        return torch.optim.Adam(param_groups, weight_decay=weight_decay)
+    if optimizer_name == "sgd":
+        return torch.optim.SGD(
+            param_groups,
+            momentum=momentum,
+            weight_decay=weight_decay,
+        )
+    raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
 
 def create_scheduler(
     optimizer: torch.optim.Optimizer,
+    scheduler_name: str,
     max_lr: float,
     epochs: int,
     steps_per_epoch: int,
-) -> torch.optim.lr_scheduler.OneCycleLR:
+) -> torch.optim.lr_scheduler.LRScheduler:
     """
-    创建 OneCycle 学习率调度器
+    创建学习率调度器。默认 cosine，OneCycle 保留 legacy 复现路径。
     
     Args:
         optimizer: 优化器
+        scheduler_name: cosine 或 onecycle
         max_lr: 最大学习率
         epochs: 总 epoch 数
         steps_per_epoch: 每个 epoch 的步数
         
     Returns:
-        torch.optim.lr_scheduler.OneCycleLR: 调度器
+        torch.optim.lr_scheduler.LRScheduler: 调度器
     """
-    return torch.optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        max_lr=max_lr,
-        epochs=epochs,
-        steps_per_epoch=steps_per_epoch
-    )
+    scheduler_name = scheduler_name.lower()
+    total_steps = max(int(epochs) * int(steps_per_epoch), 1)
+    if scheduler_name == "cosine":
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=total_steps,
+        )
+    if scheduler_name == "onecycle":
+        max_lrs = [
+            max_lr * 0.1 if group.get("name") == "backbone" else max_lr
+            for group in optimizer.param_groups
+        ]
+        return torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=max_lrs,
+            epochs=epochs,
+            steps_per_epoch=steps_per_epoch,
+        )
+    raise ValueError(f"Unsupported scheduler: {scheduler_name}")

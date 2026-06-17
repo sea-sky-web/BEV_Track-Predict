@@ -4,18 +4,53 @@ data_root: "/content/BEV_Track-Predict/wildtrack"
 
 output_dir: "/content/BEV_Track-Predict/runs/wildtrack_baseline"
 
+views: "0,1,2,3,4,5,6"
+max_frames: -1
+epochs: 10
+batch_size: 1
+pretrained: true
+fusion_mode: "confidence"
+alpha: 1.0
+optimizer: "adam"
+scheduler: "cosine"
+lr_init: 0.0001
+max_lr: 0.01
+momentum: 0.9
+weight_decay: 0.0001
+freeze_backbone_epochs: 3
+
 train_command:
   - "python"
   - "scripts/train_main.py"
   - "--data_root"
   - "/content/BEV_Track-Predict/wildtrack"
+  - "--views"
+  - "0,1,2,3,4,5,6"
+  - "--max_frames"
+  - "-1"
   - "--epochs"
   - "10"
   - "--batch"
-  - "2"
+  - "1"
+  - "--pretrained"
+  - "true"
+  - "--fusion_mode"
+  - "confidence"
+  - "--alpha"
+  - "1.0"
+  - "--optimizer"
+  - "adam"
+  - "--scheduler"
+  - "cosine"
+  - "--lr_init"
+  - "0.0001"
+  - "--weight_decay"
+  - "0.0001"
+  - "--freeze_backbone_epochs"
+  - "3"
 
-target_metric: "moda"
-target_value: 0.75
+target_metric: "det_f1"
+target_value: 0.40
 
 log_tail_lines: 500
 

@@ -44,7 +44,8 @@ CAM_NAMES = [
 # ============================================================================
 
 # 数据相关
-DEFAULT_MAX_FRAMES = 300
+DEFAULT_VIEWS = "0,1,2,3,4,5,6"
+DEFAULT_MAX_FRAMES = -1
 DEFAULT_BATCH_SIZE = 1
 DEFAULT_NUM_WORKERS = 2
 
@@ -67,23 +68,26 @@ DEFAULT_IMG_KSIZE = 11                 # 图像热图高斯核大小
 DEFAULT_IMG_SIGMA = 2.0                # 图像热图高斯标准差
 
 # 优化器
-DEFAULT_MAX_LR = 0.1
-DEFAULT_LR_INIT = 1e-3
-DEFAULT_MOMENTUM = 0.5
-DEFAULT_WEIGHT_DECAY = 5e-4
+DEFAULT_OPTIMIZER = "adam"
+DEFAULT_SCHEDULER = "cosine"
+DEFAULT_MAX_LR = 0.01
+DEFAULT_LR_INIT = 1e-4
+DEFAULT_MOMENTUM = 0.9
+DEFAULT_WEIGHT_DECAY = 1e-4
 
 # 训练策略
 DEFAULT_EPOCHS = 10
 DEFAULT_LOG_EVERY = 20
+DEFAULT_FREEZE_BACKBONE_EPOCHS = 3
 
 # 视图过滤
-DEFAULT_VALID_THR = 0.10               # 有效投影比例阈值
+DEFAULT_VALID_THR = 0.05               # 有效投影比例阈值
 
 # 计算设备
 DEFAULT_DEVICE = "cuda"
 DEFAULT_AMP_ENABLED = False
 DEFAULT_FREEZE_BN = False
-DEFAULT_PRETRAINED = False
+DEFAULT_PRETRAINED = True
 
 # 数据目录
 DEFAULT_DATA_ROOT = "wildtrack"

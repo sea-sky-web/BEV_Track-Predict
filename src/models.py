@@ -8,7 +8,7 @@ from typing import Literal, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
+from torchvision.models import ResNet50_Weights, resnet50
 
 from geometry import warp_perspective_torch
 
@@ -41,12 +41,12 @@ class ResNet50Stride8Trunk(nn.Module):
         super().__init__()
         
         # 加载预训练权重
-        weights = torchvision.models.ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
+        weights = ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
         
         # 创建 ResNet50 并应用 dilated convolutions
         # replace_stride_with_dilation=[False, True, True]
         # layer2 和 layer3 使用空洞卷积
-        m = torchvision.models.resnet50(
+        m = resnet50(
             weights=weights,
             replace_stride_with_dilation=[False, True, True]
         )

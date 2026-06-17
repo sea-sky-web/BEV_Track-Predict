@@ -89,7 +89,18 @@ def build_ai_context(
     status = "success" if success else "failed"
     views = exp_cfg.get("views", current_metrics.get("views", "Unavailable"))
     max_frames = exp_cfg.get("max_frames", current_metrics.get("max_frames", "Unavailable"))
+    pretrained = exp_cfg.get("pretrained", current_metrics.get("pretrained", "Unavailable"))
     fusion_mode = exp_cfg.get("fusion_mode", current_metrics.get("fusion_mode", "concat"))
+    optimizer = exp_cfg.get("optimizer", current_metrics.get("optimizer", "Unavailable"))
+    scheduler = exp_cfg.get("scheduler", current_metrics.get("scheduler", "Unavailable"))
+    lr_init = exp_cfg.get("lr_init", current_metrics.get("lr_init", "Unavailable"))
+    max_lr = exp_cfg.get("max_lr", current_metrics.get("max_lr", "Unavailable"))
+    momentum = exp_cfg.get("momentum", current_metrics.get("momentum", "Unavailable"))
+    weight_decay = exp_cfg.get("weight_decay", current_metrics.get("weight_decay", "Unavailable"))
+    freeze_backbone_epochs = exp_cfg.get(
+        "freeze_backbone_epochs",
+        current_metrics.get("freeze_backbone_epochs", "Unavailable"),
+    )
     checkpoint_path = exp_cfg.get("checkpoint_path", current_metrics.get("checkpoint_path", "Unavailable"))
     train_command = exp_cfg.get("train_command", cfg.get("train_command", []))
     train_command_text = " ".join(str(x) for x in train_command) if isinstance(train_command, list) else str(train_command)
@@ -158,16 +169,16 @@ Main failure: {_fmt(_metric(previous_metrics, 'main_failure')) if previous_metri
 
 ## 5. Improvement Hypothesis
 
-Because the current training logic follows the MVDet pattern of BEV heatmap supervision plus per-view auxiliary image heatmap supervision,
-we expose and record the auxiliary loss alpha for Colab experiments,
-expecting stronger pre-BEV per-view supervision to reduce feature information loss before projection and improve F1.
+Because the latest successful WildTrack run still has low F1 and the training defaults previously used limited data/views and did not record pretrained status,
+we train with an explicit pretrained backbone status, optimizer/scheduler settings, view set, and frame limit,
+expecting the resulting metrics to show whether ImageNet initialization and full WildTrack coverage improve BEV detection.
 
 ## 6. Changes Made
 
 Changed files:
-- scripts/run_colab_exp.py: passes ALPHA from Colab config or environment and records it in metrics.json.
-- scripts/commit_ai_runs.py: records auxiliary supervision alpha in ai_context.md.
-- docs/experiment_protocol.md: marks auxiliary loss alpha as comparison-critical.
+- Run configuration: recorded pretrained status, optimizer, scheduler, learning rates, freeze_backbone_epochs, views, and max_frames.
+- scripts/run_colab_exp.py: prepared metrics.json with comparison-critical training defaults.
+- scripts/commit_ai_runs.py: recorded comparison-critical training defaults in ai_context.md.
 
 ## 7. Training Configuration
 
@@ -175,12 +186,19 @@ dataset: WildTrack
 views: {_fmt(views)}
 epochs: {_fmt(exp_cfg.get('epochs', 'Unavailable'))}
 batch_size: {_fmt(exp_cfg.get('batch_size', 'Unavailable'))}
-learning_rate: Unavailable
+learning_rate: {_fmt(lr_init)}
 max_frames: {_fmt(max_frames)}
 device: Unavailable
 seed: Unavailable
 checkpoint_path: {_fmt(checkpoint_path)}
+pretrained: {_fmt(pretrained)}
 fusion_mode: {_fmt(fusion_mode)}
+optimizer: {_fmt(optimizer)}
+scheduler: {_fmt(scheduler)}
+max_lr: {_fmt(max_lr)}
+momentum: {_fmt(momentum)}
+weight_decay: {_fmt(weight_decay)}
+freeze_backbone_epochs: {_fmt(freeze_backbone_epochs)}
 alpha: {_fmt(alpha)}
 bev_pos_weight: {_fmt(loss_config.get('bev_pos_weight', 'Unavailable'))}
 bev_neg_weight: {_fmt(loss_config.get('bev_neg_weight', 'Unavailable'))}

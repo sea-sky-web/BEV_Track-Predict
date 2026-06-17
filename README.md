@@ -37,20 +37,25 @@ pip install -r requirements.txt
 从仓库根目录执行（推荐）：
 
 ```bash
-python src/train_main.py --data_root wildtrack --views 0,1,2 --device cuda
+python src/train_main.py --data_root wildtrack --device cuda
 ```
 
 常用参数：
 
-- `--views`：多视角 ID（例如 `0,1,2` 或 `0,3,5`）
+- `--views`：多视角 ID，默认使用全部 7 个 WildTrack 视角 `0,1,2,3,4,5,6`
 - `--epochs`：默认 `10`
-- `--max_frames`：默认 `300`（`-1` 表示使用全部）
+- `--max_frames`：默认 `-1`，表示使用全部帧；可设为小正数进行 smoke test
 - `--batch`：默认 `1`
 - `--bev_down`：默认 `4`
+- `--pretrained true|false` / `--no-pretrained`：默认使用 ImageNet 预训练 ResNet-50 backbone
+- `--optimizer`：默认 `adam`；`sgd` 保留给 legacy 复现实验
+- `--scheduler`：默认 `cosine`；`onecycle` 保留给 legacy 复现实验
+- `--lr_init` / `--weight_decay`：Adam 默认分别为 `1e-4` / `1e-4`
+- `--freeze_backbone_epochs`：默认 `3`，前 3 个 epoch 冻结共享 image backbone
 - `--amp`：启用自动混合精度（仅 `cuda` 时有效）
 - `--drop_bad_views`：丢弃投影 `valid_ratio` 低于阈值的视角
-- `--valid_thr`：默认 `0.10`
-- `--lr_init` / `--momentum` / `--weight_decay`：SGD 超参数
+- `--valid_thr`：默认 `0.05`
+- `--momentum` / `--max_lr`：SGD + OneCycle legacy 复现实验参数
 
 输出目录与模型文件：
 
@@ -68,7 +73,7 @@ python src/train_main.py --data_root wildtrack --views 0,1,2 --device cuda
 评估脚本：`src/evaluate_main.py`
 
 ```bash
-python src/evaluate_main.py --data_root wildtrack --views 0,1,2 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda
+python src/evaluate_main.py --data_root wildtrack --views 0,1,2,3,4,5,6 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda
 ```
 
 如需做“检测级”评估（阈值扫描 + Precision/Recall/F1 + 定位误差），可直接启用：

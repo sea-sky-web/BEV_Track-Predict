@@ -189,6 +189,10 @@ train_tail.log
 error.log
 ```
 
+Each `ai_context.md` must explicitly record the pretrained backbone status,
+optimizer, scheduler, learning rate, weight decay, freeze_backbone_epochs,
+selected views, and max_frames used by the run.
+
 The timestamped directory is the authoritative experiment record.
 
 `latest` or `latest_run.txt` may only point to the most recent run.

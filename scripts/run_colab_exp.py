@@ -103,6 +103,24 @@ def _append_float_override(
     command.extend([flag, str(value)])
 
 
+def _append_value_override(
+    command: list[str],
+    cfg: dict[str, Any],
+    *,
+    flag: str,
+    cfg_key: str,
+    env_key: str,
+) -> None:
+    if flag in command:
+        return
+    raw = os.environ.get(env_key)
+    if raw is None:
+        raw = cfg.get(cfg_key)
+    if raw is None:
+        return
+    command.extend([flag, str(raw).lower() if isinstance(raw, bool) else str(raw)])
+
+
 def _repo_path(raw: Union[str, Path]) -> Path:
     path = Path(raw)
     if path.is_absolute():
@@ -141,18 +159,37 @@ def build_experiment_config(
     train_command: list[str],
     train_log: Path,
 ) -> dict[str, Any]:
-    views = str(cfg.get("views") or _flag_value(train_command, "--views", "0,1,2"))
-    max_frames = cfg.get("max_frames")
-    if max_frames is None:
-        max_frames = _int_flag_value(train_command, "--max_frames", None)
-    epochs = cfg.get("epochs")
-    if epochs is None:
-        epochs = _int_flag_value(train_command, "--epochs", None)
-    batch_size = cfg.get("batch_size")
-    if batch_size is None:
-        batch_size = _int_flag_value(train_command, "--batch", None)
+    views = str(_flag_value(train_command, "--views", cfg.get("views", "0,1,2,3,4,5,6")))
+    max_frames = _int_flag_value(train_command, "--max_frames", cfg.get("max_frames"))
+    epochs = _int_flag_value(train_command, "--epochs", cfg.get("epochs"))
+    batch_size = _int_flag_value(train_command, "--batch", cfg.get("batch_size"))
 
-    fusion_mode = str(cfg.get("fusion_mode") or _flag_value(train_command, "--fusion_mode", "concat"))
+    if "--no-pretrained" in train_command:
+        pretrained = False
+    else:
+        pretrained_raw = _flag_value(train_command, "--pretrained", cfg.get("pretrained"))
+        if pretrained_raw is None:
+            pretrained = None
+        elif isinstance(pretrained_raw, bool):
+            pretrained = pretrained_raw
+        elif str(pretrained_raw).strip().lower() in {"1", "true", "yes", "y", "on"}:
+            pretrained = True
+        elif str(pretrained_raw).strip().lower() in {"0", "false", "no", "n", "off"}:
+            pretrained = False
+        else:
+            pretrained = pretrained_raw
+    fusion_mode = str(_flag_value(train_command, "--fusion_mode", cfg.get("fusion_mode", "concat")))
+    optimizer = str(_flag_value(train_command, "--optimizer", cfg.get("optimizer", "adam")))
+    scheduler = str(_flag_value(train_command, "--scheduler", cfg.get("scheduler", "cosine")))
+    lr_init = _float_flag_value(train_command, "--lr_init", cfg.get("lr_init"))
+    max_lr = _float_flag_value(train_command, "--max_lr", cfg.get("max_lr"))
+    momentum = _float_flag_value(train_command, "--momentum", cfg.get("momentum"))
+    weight_decay = _float_flag_value(train_command, "--weight_decay", cfg.get("weight_decay"))
+    freeze_backbone_epochs = _int_flag_value(
+        train_command,
+        "--freeze_backbone_epochs",
+        cfg.get("freeze_backbone_epochs"),
+    )
     alpha = _float_flag_value(train_command, "--alpha", None)
     if alpha is None:
         try:
@@ -173,7 +210,15 @@ def build_experiment_config(
         "max_frames": max_frames,
         "epochs": epochs,
         "batch_size": batch_size,
+        "pretrained": pretrained,
         "fusion_mode": fusion_mode,
+        "optimizer": optimizer,
+        "scheduler": scheduler,
+        "lr_init": lr_init,
+        "max_lr": max_lr,
+        "momentum": momentum,
+        "weight_decay": weight_decay,
+        "freeze_backbone_epochs": freeze_backbone_epochs,
         "alpha": alpha,
         "loss_config": loss_config,
         "train_command": train_command,
@@ -194,12 +239,60 @@ def main() -> int:
     exp_name = str(cfg.get("exp_name", "colab_exp"))
     output_dir = Path(str(cfg.get("output_dir", ROOT / "runs" / exp_name)))
     train_command = [str(x) for x in cfg.get("train_command", ["python", "scripts/train_main.py"])]
+    _append_value_override(
+        train_command, cfg,
+        flag="--views", cfg_key="views", env_key="VIEWS",
+    )
+    _append_value_override(
+        train_command, cfg,
+        flag="--max_frames", cfg_key="max_frames", env_key="MAX_FRAMES",
+    )
+    _append_value_override(
+        train_command, cfg,
+        flag="--epochs", cfg_key="epochs", env_key="EPOCHS",
+    )
+    _append_value_override(
+        train_command, cfg,
+        flag="--batch", cfg_key="batch_size", env_key="BATCH_SIZE",
+    )
+    _append_value_override(
+        train_command, cfg,
+        flag="--pretrained", cfg_key="pretrained", env_key="PRETRAINED",
+    )
     fusion_mode = str(os.environ.get("FUSION_MODE") or cfg.get("fusion_mode", "concat")).strip().lower()
     if "--fusion_mode" not in train_command:
         train_command.extend(["--fusion_mode", fusion_mode])
+    _append_value_override(
+        train_command, cfg,
+        flag="--optimizer", cfg_key="optimizer", env_key="OPTIMIZER",
+    )
+    _append_value_override(
+        train_command, cfg,
+        flag="--scheduler", cfg_key="scheduler", env_key="SCHEDULER",
+    )
+    _append_value_override(
+        train_command, cfg,
+        flag="--freeze_backbone_epochs", cfg_key="freeze_backbone_epochs", env_key="FREEZE_BACKBONE_EPOCHS",
+    )
     _append_float_override(
         train_command, cfg,
         flag="--alpha", cfg_key="alpha", env_key="ALPHA",
+    )
+    _append_float_override(
+        train_command, cfg,
+        flag="--lr_init", cfg_key="lr_init", env_key="LR_INIT",
+    )
+    _append_float_override(
+        train_command, cfg,
+        flag="--max_lr", cfg_key="max_lr", env_key="MAX_LR",
+    )
+    _append_float_override(
+        train_command, cfg,
+        flag="--momentum", cfg_key="momentum", env_key="MOMENTUM",
+    )
+    _append_float_override(
+        train_command, cfg,
+        flag="--weight_decay", cfg_key="weight_decay", env_key="WEIGHT_DECAY",
     )
     _append_float_override(
         train_command, cfg,
@@ -264,7 +357,15 @@ def main() -> int:
         "dataset": experiment_config["dataset"],
         "views": experiment_config["views"],
         "max_frames": experiment_config["max_frames"],
+        "pretrained": experiment_config["pretrained"],
         "fusion_mode": experiment_config["fusion_mode"],
+        "optimizer": experiment_config["optimizer"],
+        "scheduler": experiment_config["scheduler"],
+        "lr_init": experiment_config["lr_init"],
+        "max_lr": experiment_config["max_lr"],
+        "momentum": experiment_config["momentum"],
+        "weight_decay": experiment_config["weight_decay"],
+        "freeze_backbone_epochs": experiment_config["freeze_backbone_epochs"],
         "alpha": experiment_config["alpha"],
         "checkpoint_path": experiment_config["checkpoint_path"],
         "actual_metrics": actual_metrics,
