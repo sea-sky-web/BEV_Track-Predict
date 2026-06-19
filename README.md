@@ -1,125 +1,246 @@
-# BEV_Track&Predict
+# BEV_Track-Predict
 
-Current stage: only BEV pedestrian detection and point extraction are active.
-Tracking and prediction are later-stage tasks and are not part of the current model definition.
+WildTrack 多视角 BEV 行人检测原型。当前阶段只做 BEV heatmap 预测、BEV 点检测和检测指标评估；tracking、ReID、轨迹预测、占用流预测和大型 BEV 框架替换都不在当前范围内。
 
-本仓库目标：在 Wildtrack 数据集上快速搭建并跑通一个“多视角→BEV→行人占据/定位(POM)→后续关联与预测”的可训练闭环原型。优先工程闭环与可复现实验，不走长理论铺垫路线。
+本仓库的目标是搭建一个可训练、可评估、可复现实验记录的 MVDet-style 闭环：
 
-## 快速开始
+```text
+WildTrack synchronized multi-view images
+→ shared pretrained image backbone
+→ geometry-based BEV projection
+→ multi-view BEV fusion
+→ BEV pedestrian heatmap
+→ BEV point detections
+→ Precision / Recall / F1 / MODA / MODP
+```
 
-### 环境依赖
+## 当前默认链路
+
+`src/config.py` 中的当前默认值：
+
+- 数据集：WildTrack
+- 视角：全部 7 个视角 `0,1,2,3,4,5,6`
+- 帧数：`max_frames=-1`，使用全部帧
+- backbone：`resnet18`
+- pretrained：`true`，使用 ImageNet 预训练权重
+- fusion：`confidence_v2`
+- batch：`1`
+- optimizer：Adam
+- scheduler：CosineAnnealingLR
+- `lr_init=1e-4`
+- `weight_decay=1e-4`
+- `freeze_backbone_epochs=3`
+- augmentation：默认启用颜色抖动；水平翻转默认 `0.0`
+- evaluation：阈值扫描 + Precision / Recall / F1 / MODA / MODP / localization error
+
+`resnet50`、`concat`、`confidence_v1`、SGD 和 OneCycle 仍保留为显式 legacy/ablation 选项。
+
+## 安装
 
 ```bash
 pip install -r requirements.txt
 ```
 
-其中 `torch/torchvision` 需要你按本机 CUDA/驱动情况安装匹配版本（`requirements.txt` 里给的是最小约束：`torch>=2.0`、`torchvision>=0.15`）。
+`requirements.txt` 给出最小依赖约束。`torch` / `torchvision` 建议按本机 CUDA 或 Colab 环境单独选择匹配版本安装。
 
-### 数据集目录（Wildtrack）
+## WildTrack 数据目录
 
-`src/train_main.py` 默认使用的数据根目录是 `wildtrack`（见 `src/config.py` 的 `DEFAULT_DATA_ROOT`）。代码期望如下结构：
+默认数据根目录是 `wildtrack`。期望结构：
 
-- `wildtrack/rectangles.pom`
-- `wildtrack/annotations_positions/*.json`
-  - 每个样本的 JSON 至少需要包含 `positionID` 字段；该字段会被映射到 BEV 网格 `(ix, iy)`，用于生成 BEV 主监督热图
-- `wildtrack/Image_subsets/C1..C7/`
-  - 每个选定视角会读取对应目录里的图像：文件名 stem 需要与 `annotations_positions/*.json` 的 stem 一致
-  - 支持扩展名：`.png/.jpg/.jpeg`
-- `wildtrack/calibrations/`
-  - `intrinsic_zero/intr_<CAM>.xml`
-  - `extrinsic/extr_<CAM>.xml`
-  - 其中 `<CAM>` 来自 `src/config.py` 的 `CAM_NAMES`
-
-### 训练（当前主入口）
-
-训练入口脚本：`src/train_main.py`
-
-从仓库根目录执行（推荐）：
-
-```bash
-python src/train_main.py --data_root wildtrack --device cuda
+```text
+wildtrack/
+├── rectangles.pom
+├── annotations_positions/
+│   └── *.json
+├── Image_subsets/
+│   ├── C1/
+│   ├── C2/
+│   └── ...
+└── calibrations/
+    ├── intrinsic_zero/
+    │   └── intr_<CAM>.xml
+    └── extrinsic/
+        └── extr_<CAM>.xml
 ```
 
-常用参数：
+每个 annotation JSON 至少需要包含 `positionID`。图像文件 stem 需要和 annotation stem 一致，支持 `.png`、`.jpg`、`.jpeg`。
 
-- `--views`：多视角 ID，默认使用全部 7 个 WildTrack 视角 `0,1,2,3,4,5,6`
-- `--epochs`：默认 `10`
-- `--max_frames`：默认 `-1`，表示使用全部帧；可设为小正数进行 smoke test
-- `--batch`：默认 `1`
-- `--bev_down`：默认 `4`
-- `--backbone`：默认 `resnet18`；`resnet50` 保留为 legacy 复现实验
-- `--pretrained true|false` / `--no-pretrained`：默认使用 ImageNet 预训练 backbone
-- `--fusion_mode`：默认 `confidence_v2`；`concat` 和 `confidence_v1` 保留为对照/legacy
-- `--optimizer`：默认 `adam`；`sgd` 保留给 legacy 复现实验
-- `--scheduler`：默认 `cosine`；`onecycle` 保留给 legacy 复现实验
-- `--lr_init` / `--weight_decay`：Adam 默认分别为 `1e-4` / `1e-4`
-- `--freeze_backbone_epochs`：默认 `3`，前 3 个 epoch 冻结共享 image backbone
-- `--augment true|false` / `--no-augment`：默认启用颜色抖动；水平翻转默认 `0.0`
-- `--amp`：启用自动混合精度（仅 `cuda` 时有效）
-- `--drop_bad_views`：丢弃投影 `valid_ratio` 低于阈值的视角
-- `--valid_thr`：默认 `0.05`
-- `--momentum` / `--max_lr`：SGD + OneCycle legacy 复现实验参数
+## 训练
 
-输出目录与模型文件：
-
-- 默认输出目录：`outputs/train_multicam_mvdet_style_v3`（见 `src/config.py` 的 `DEFAULT_OUTPUT_DIR`）
-- 每 5 个 epoch 保存一次：`model_epoch{epoch}.pth`
-- 训练结束保存最终模型：`model_final.pth`（`state_dict`）
-
-训练过程中会打印：
-
-- 每个视角的投影 `valid_ratio`
-- step 级别的 `loss/bev/img/pos_mse/aux_pos_mse`（频率由 `--log_every` 控制）
-
-### 评估入口
-
-评估脚本：`src/evaluate_main.py`
+推荐从仓库根目录运行：
 
 ```bash
-python src/evaluate_main.py --data_root wildtrack --views 0,1,2,3,4,5,6 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda
+python src/train_main.py \
+  --data_root wildtrack \
+  --device cuda
 ```
 
-如需做“检测级”评估（阈值扫描 + Precision/Recall/F1 + MODA/MODP + 定位误差），可直接启用：
+等价的显式当前默认命令：
 
 ```bash
-python src/evaluate_main.py --data_root wildtrack --views 0,1,2,3,4,5,6 --backbone resnet18 --fusion_mode confidence_v2 --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth --device cuda --report_detection --metrics_out outputs/eval_metrics.json
+python src/train_main.py \
+  --data_root wildtrack \
+  --views 0,1,2,3,4,5,6 \
+  --max_frames -1 \
+  --batch 1 \
+  --backbone resnet18 \
+  --pretrained true \
+  --fusion_mode confidence_v2 \
+  --augment true \
+  --augment_hflip_prob 0.0 \
+  --augment_color_jitter 0.2,0.2,0.2,0.05 \
+  --optimizer adam \
+  --scheduler cosine \
+  --lr_init 0.0001 \
+  --weight_decay 0.0001 \
+  --freeze_backbone_epochs 3 \
+  --device cuda
 ```
 
-该脚本与 `src/train_main.py` 使用相同的投影与数据构建链路，输出 `loss/bev_loss/img_loss/pos_mse/aux_pos_mse` 以及模型参数统计。
+输出：
 
-几何和融合可视化需要真实 WildTrack 数据与 checkpoint：
+- 默认目录：`outputs/train_multicam_mvdet_style_v3`
+- 每 5 个 epoch 保存一次 checkpoint
+- 最终模型：`outputs/train_multicam_mvdet_style_v3/model_final.pth`
+
+## 评估
+
+Loss-level 评估：
 
 ```bash
-python scripts/visualize_projection.py --data_root wildtrack --views 0,1,2,3,4,5,6
-python scripts/visualize_fusion_weights.py --data_root wildtrack --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth
+python src/evaluate_main.py \
+  --data_root wildtrack \
+  --views 0,1,2,3,4,5,6 \
+  --backbone resnet18 \
+  --fusion_mode confidence_v2 \
+  --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth \
+  --device cuda
 ```
 
-无数据快速验证可运行：
+检测级评估：
 
 ```bash
-PYTHONPATH=src pytest tests/test_geometry.py tests/test_metrics.py tests/test_augmentation.py tests/test_smoke_forward.py -v
+python src/evaluate_main.py \
+  --data_root wildtrack \
+  --views 0,1,2,3,4,5,6 \
+  --backbone resnet18 \
+  --fusion_mode confidence_v2 \
+  --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth \
+  --device cuda \
+  --report_detection \
+  --metrics_out outputs/eval_metrics.json
 ```
 
-## 历史探索归档
+检测输出包含：
 
-- 历史训练原型：`archive/legacy/training_prototypes/`
-- Colab 自动化快照：`archive/legacy/colab_automation_snapshot/`
-- 归档索引：`archive/legacy/README.md`
-- 探索记忆文档：`docs/EXPLORATION_MEMORY.md`
+- `det_precision`
+- `det_recall`
+- `det_f1`
+- `det_moda`
+- `det_modp`
+- `det_loc_err_m`
+- `det_tp` / `det_fp` / `det_fn`
+- extraction config，包括阈值、NMS、最大预测数和 MODA matching distance
 
-`scripts/` 目录不再承载历史训练入口，仅保留活动工具脚本（见 `scripts/README.md`）。
+训练 loss 不能单独作为模型改进证据。是否改进必须依赖相同配置下的正式评估指标对比。
 
-## 代码模块对应关系
+## Colab 实验闭环
 
-- 数据加载与标签生成：`src/dataset.py`
-- 标定与投影相关：`src/calibration.py`
-- MODA/MODP 与检测统计：`src/metrics.py`
-- 网络结构：`src/models.py`
-- 训练循环与检查点：`src/trainer.py`
-- 主训练脚本/参数入口：`src/train_main.py`
+Colab 默认配置：
+
+```text
+configs/exp_colab.yaml
+```
+
+运行：
+
+```bash
+python scripts/run_colab_exp.py
+```
+
+正式实验记录应写入：
+
+```text
+ai_runs/YYYYMMDD_HHMMSS/
+├── ai_context.md
+├── metrics.json
+├── train_tail.log
+└── error.log
+```
+
+每个 `ai_context.md` 必须记录 backbone、pretrained、fusion、augmentation、optimizer、scheduler、views、max_frames、loss 配置和检测指标。不要在正式 Colab 结果确认前宣称 F1/MODA 达标。
+
+## 可视化工具
+
+投影覆盖检查：
+
+```bash
+python scripts/visualize_projection.py \
+  --data_root wildtrack \
+  --views 0,1,2,3,4,5,6
+```
+
+`confidence_v2` per-view 权重图：
+
+```bash
+python scripts/visualize_fusion_weights.py \
+  --data_root wildtrack \
+  --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth
+```
+
+这些脚本需要真实 WildTrack 数据或真实 checkpoint。不要用手绘或合成图作为几何/融合验证证据。
+
+## 无数据验证
+
+静态检查：
+
+```bash
+PYTHONPYCACHEPREFIX=/private/tmp/bevtrack_pycache python -m compileall src scripts tests
+```
+
+测试：
+
+```bash
+PYTHONPATH=src pytest \
+  tests/test_geometry.py \
+  tests/test_metrics.py \
+  tests/test_augmentation.py \
+  tests/test_smoke_forward.py \
+  -v
+```
+
+GitHub Actions 的 `Python Smoke` workflow 会安装 CPU 版 PyTorch，并覆盖几何、MODA/MODP、augmentation 和 ResNet-18 forward/backward smoke。
+
+## 代码结构
+
+- `src/config.py`：默认参数和 WildTrack 常量
+- `src/augmentation.py`：训练增强
+- `src/calibration.py`：标定读取和单位推断
+- `src/geometry.py`：投影矩阵、valid ratio、torch warp
+- `src/dataset.py`：WildTrack 多视角数据集和 GT 构建
+- `src/models.py`：ResNet backbone、BEV projection、fusion、heads
+- `src/loss.py`：Gaussian MSE loss
+- `src/metrics.py`：MODA/MODP 和检测统计
+- `src/trainer.py`：训练循环、优化器、scheduler、checkpoint
+- `src/train_main.py`：训练入口
+- `src/evaluate_main.py`：评估入口
+- `scripts/run_colab_exp.py`：Colab launcher
+- `scripts/commit_ai_runs.py`：实验记录归档
+- `scripts/visualize_projection.py`：投影可视化
+- `scripts/visualize_fusion_weights.py`：融合权重可视化
+
+## 文档
+
+- 模型边界：`docs/model_definition.md`
+- 实验协议：`docs/experiment_protocol.md`
+- 迭代记录格式：`docs/experiment_iteration_protocol.md`
+- 数据契约：`docs/dataset_contract.md`
+- 历史探索：`docs/EXPLORATION_MEMORY.md`
 
 ## 常见问题
 
-- 找不到模块/导入失败：请从仓库根目录用 `python src/train_main.py ...` 运行
-- 报错提示 `annotations_positions` 不存在：请检查数据集目录结构
-- 报错提示标定 XML 不存在：请检查 `wildtrack/calibrations/intrinsic_zero` 与 `wildtrack/calibrations/extrinsic` 下的文件命名
+- 找不到模块：从仓库根目录运行命令，或设置 `PYTHONPATH=src`
+- 找不到 `annotations_positions`：检查 WildTrack 数据根目录
+- 找不到标定 XML：检查 `wildtrack/calibrations/intrinsic_zero` 和 `wildtrack/calibrations/extrinsic`
+- checkpoint shape mismatch：训练和评估的 `--views`、`--backbone`、`--fusion_mode`、`--bev_down`、`--feat_h`、`--feat_w` 必须一致
+- 本地 pytest 缺依赖：先安装 `requirements.txt`，或等待 GitHub Actions smoke
