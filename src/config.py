@@ -64,10 +64,10 @@ DEFAULT_PERSON_H = 1.7                 # 人体高度（米）
 
 # 损失函数
 DEFAULT_ALPHA = 1.0                    # 图像损失权重
-DEFAULT_MAP_KSIZE = 11                 # BEV 热图高斯核大小
-DEFAULT_MAP_SIGMA = 2.5                # BEV 热图高斯标准差
-DEFAULT_IMG_KSIZE = 11                 # 图像热图高斯核大小
-DEFAULT_IMG_SIGMA = 2.0                # 图像热图高斯标准差
+DEFAULT_MAP_KSIZE = 41                 # BEV 热图高斯核大小（MVDet: 41）
+DEFAULT_MAP_SIGMA = 5.0                # BEV 热图高斯标准差（MVDet: 5.0）
+DEFAULT_IMG_KSIZE = 21                 # 图像热图高斯核大小（MVDet: 21）
+DEFAULT_IMG_SIGMA = 2.5                # 图像热图高斯标准差（MVDet: 2.5）
 
 # 优化器
 DEFAULT_OPTIMIZER = "adam"
