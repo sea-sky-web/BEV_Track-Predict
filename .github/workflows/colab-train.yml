@@ -69,6 +69,12 @@ jobs:
       - name: Mount Google Drive
         run: colab drivemount -s bev-train /content/drive
 
+      # 调试：查看 Drive 目录结构，确认 zip 路径
+      - name: List Drive contents
+        run: |
+          echo "ls /content/drive/MyDrive/" | colab exec -s bev-train --timeout 30 || true
+          echo "import os; [print(os.path.join(dp,f)) for dp,_,fn in os.walk('/content/drive/MyDrive/') for f in fn if 'wildtrack' in f.lower() or 'wild' in f.lower()][:20]" | colab exec -s bev-train --timeout 30 || true
+
       # colab exec -f 不支持传参给脚本，用 stdin 注入变量后执行
       - name: Run training
         run: |
