@@ -2,16 +2,13 @@
 """
 Colab 训练启动脚本。
 
-用法：
-    # 本地 CLI（手动）
-    colab run --gpu T4 --keep --session bev-train --timeout 18000 \
-        scripts/colab_train.py --epochs 10
+前置条件（由 GitHub Actions workflow 或手动完成）：
+    colab new --gpu T4 -s bev-train
+    colab drivemount -s bev-train
 
-    # GitHub Actions 通过 workflow_dispatch 触发
-    colab run --gpu T4 --keep --session bev-train --timeout 18000 \
-        scripts/colab_train.py \
-        --data_root /content/drive/MyDrive/wildtrack \
-        --epochs 10
+用法：
+    colab exec -s bev-train -f scripts/colab_train.py --timeout 18000 \
+        -- --data_zip /content/drive/MyDrive/Colab_Notebooks/dataSet/wildtrack.zip
 """
 from __future__ import annotations
 
@@ -23,13 +20,6 @@ from pathlib import Path
 
 REPO_URL = "https://github.com/sea-sky-web/BEV_Track-Predict.git"
 REPO_DIR = Path("/content/BEV_Track-Predict")
-
-DRIVE_CANDIDATES = [
-    "/content/drive/MyDrive/wildtrack",
-    "/content/drive/MyDrive/datasets/wildtrack",
-    "/content/drive/MyDrive/Wildtrack",
-    "/content/drive/MyDrive/WildTrack",
-]
 
 
 def run(cmd, cwd=None, check=True):
@@ -43,13 +33,14 @@ def banner(msg: str):
     print(f"\n{'=' * 60}\n  {msg}\n{'=' * 60}")
 
 
-# ── CLI 参数 ───────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
+parser.add_argument("--data_zip",
+                    default="/content/drive/MyDrive/Colab_Notebooks/dataSet/wildtrack.zip",
+                    help="Drive 上 wildtrack.zip 的绝对路径")
 parser.add_argument("--data_root", default=None,
-                    help="数据集绝对路径。不填时从 Drive 候选路径自动检测。")
+                    help="已解压的数据集路径（优先于 --data_zip）")
 parser.add_argument("--epochs", type=int, default=10)
-parser.add_argument("--gpu", default="cuda",
-                    help="'cuda' 或 'cpu'，传给 train_main.py --device")
+parser.add_argument("--device", default="cuda")
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
@@ -59,69 +50,53 @@ if REPO_DIR.exists():
 else:
     run(["git", "clone", REPO_URL, str(REPO_DIR)])
 
-# ── 2. 挂载 Drive（最佳努力）并确定数据集路径 ─────────────────
-banner("2/5  数据集定位")
+os.chdir(str(REPO_DIR))
+
+# ── 2. 定位 / 解压数据集 ──────────────────────────────────────
+banner("2/5  数据集准备")
+data_root = REPO_DIR / "wildtrack"
 
 if args.data_root:
-    # 如果 data_root 在 Drive 下，先尝试挂载
-    if str(args.data_root).startswith("/content/drive"):
-        try:
-            from google.colab import drive  # type: ignore
-            drive.mount("/content/drive")
-            print("[OK] Google Drive 已挂载")
-        except Exception as e:
-            print(f"[WARN] Drive 挂载失败：{e}")
     data_root = Path(args.data_root)
     if not data_root.exists():
         print(f"[ERROR] 指定的 data_root 不存在：{data_root}")
         sys.exit(1)
-    print(f"[OK] 使用指定路径：{data_root}")
+    print(f"[OK] 使用已有数据：{data_root}")
+elif data_root.is_dir() and (data_root / "Image_subsets").exists():
+    print(f"[OK] 数据已存在：{data_root}")
 else:
-    # 自动检测：先挂载 Drive
-    try:
-        from google.colab import drive  # type: ignore
-        drive.mount("/content/drive")
-        print("[OK] Google Drive 已挂载")
-    except Exception as e:
-        print(f"[WARN] Drive 挂载失败：{e}")
+    # 清理可能存在的错误文件/目录
+    run(["rm", "-rf", str(REPO_DIR / "wildtrack"), str(REPO_DIR / "wiltrack")], check=False)
 
-    dataset_src = None
-    for candidate in DRIVE_CANDIDATES:
-        if Path(candidate).exists():
-            dataset_src = candidate
-            print(f"[OK] 找到数据集：{candidate}")
-            break
-
-    if dataset_src is None:
-        print("[ERROR] 未找到 wildtrack 数据集，候选路径：")
-        for c in DRIVE_CANDIDATES:
-            print(f"  {c}")
+    zip_path = Path(args.data_zip)
+    if not zip_path.exists():
+        print(f"[ERROR] zip 不存在：{zip_path}")
+        print("请确认 Google Drive 已挂载且路径正确")
         sys.exit(1)
 
-    data_root = REPO_DIR / "wildtrack"
-    if not data_root.exists():
-        run(["ln", "-s", dataset_src, str(data_root)])
-        print(f"[OK] 软链接：{data_root} -> {dataset_src}")
+    print(f"[OK] 解压 {zip_path} ...")
+    run(["unzip", "-q", str(zip_path), "-d", str(REPO_DIR)])
+    print(f"[OK] 解压完成")
 
-# ── 3. 安装依赖 ───────────────────────────────────────────────
-banner("3/5  安装 Python 依赖")
-run([sys.executable, "-m", "pip", "install", "-q",
-     "-r", str(REPO_DIR / "requirements.txt")])
-print("[OK] 依赖安装完成")
-
-# ── 4. 验证数据集 ─────────────────────────────────────────────
-banner("4/5  验证数据集结构")
+# ── 3. 验证数据集 ─────────────────────────────────────────────
+banner("3/5  验证数据集结构")
 for subdir in ["Image_subsets", "calibrations", "annotations_positions"]:
     p = data_root / subdir
     if p.exists():
         print(f"  [OK] {subdir}")
     else:
         print(f"  [ERROR] 缺少：{subdir}")
+        # 看看解压出了什么
+        run(["ls", "-la", str(REPO_DIR)], check=False)
         sys.exit(1)
+
+# ── 4. 安装依赖 ───────────────────────────────────────────────
+banner("4/5  安装 Python 依赖")
+run([sys.executable, "-m", "pip", "install", "-q",
+     "-r", str(REPO_DIR / "requirements.txt")])
 
 # ── 5. 训练 ──────────────────────────────────────────────────
 banner("5/5  开始训练")
-os.chdir(str(REPO_DIR))
 
 train_cmd = [
     sys.executable, "scripts/train_main.py",
@@ -142,7 +117,7 @@ train_cmd = [
     "--lr_init",                "0.0001",
     "--weight_decay",           "0.0001",
     "--freeze_backbone_epochs", "3",
-    "--device",                 args.gpu,
+    "--device",                 args.device,
     "--log_every",              "20",
 ]
 
@@ -151,5 +126,5 @@ ret = run(train_cmd, cwd=str(REPO_DIR), check=False)
 if ret != 0:
     sys.exit(ret)
 
-out = REPO_DIR / "outputs" / "train_multicam_mvdet_style_v3" / "model_final.pth"
-print(f"\n[OK] 训练完成，模型：{out}")
+print(f"\n[OK] 训练完成")
+print(f"模型：{REPO_DIR / 'outputs/train_multicam_mvdet_style_v3/model_final.pth'}")

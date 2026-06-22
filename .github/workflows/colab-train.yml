@@ -3,9 +3,9 @@ name: Colab Training
 on:
   workflow_dispatch:
     inputs:
-      drive_path:
-        description: 'Wildtrack 在 Google Drive MyDrive 下的路径（相对）'
-        default: 'wildtrack'
+      data_zip:
+        description: 'Drive 中 wildtrack.zip 的路径（相对于 MyDrive）'
+        default: 'Colab_Notebooks/dataSet/wildtrack.zip'
         required: false
       epochs:
         description: '训练轮数'
@@ -29,10 +29,6 @@ jobs:
       - name: Install colab-cli
         run: pip install google-colab-cli
 
-      # Secret 只需存 refresh_token 字符串（不是 JSON），避免所有格式问题
-      # 在仓库 Settings → Secrets → Actions 中新增：
-      #   名称：COLAB_REFRESH_TOKEN
-      #   值：  ~/.config/colab-cli/token.json 里 "refresh_token" 字段的值
       - name: Restore Colab credentials
         env:
           COLAB_REFRESH_TOKEN: ${{ secrets.COLAB_REFRESH_TOKEN }}
@@ -66,16 +62,19 @@ jobs:
           print("[OK] token.json constructed from refresh_token")
           EOF
 
-      - name: Run training on Colab
+      # 拆分为 new → drivemount → exec 三步，因为 drive.mount() 在 exec 内不可用
+      - name: Create Colab session
+        run: colab new --gpu ${{ inputs.gpu }} --session bev-train
+
+      - name: Mount Google Drive
+        run: colab drivemount -s bev-train /content/drive
+
+      - name: Run training
         run: |
-          colab run \
-            --gpu ${{ inputs.gpu }} \
-            --keep \
-            --session bev-train \
-            --timeout 18000 \
-            scripts/colab_train.py \
-            --data_root /content/drive/MyDrive/${{ inputs.drive_path }} \
-            --epochs ${{ inputs.epochs }}
+          colab exec -s bev-train --timeout 18000 \
+            -f scripts/colab_train.py \
+            -- --data_zip /content/drive/MyDrive/${{ inputs.data_zip }} \
+               --epochs ${{ inputs.epochs }}
 
       - name: Download checkpoint
         if: always()
