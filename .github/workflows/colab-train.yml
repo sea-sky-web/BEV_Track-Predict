@@ -69,12 +69,13 @@ jobs:
       - name: Mount Google Drive
         run: colab drivemount -s bev-train /content/drive
 
+      # colab exec -f 不支持传参给脚本，用 stdin 注入变量后执行
       - name: Run training
         run: |
-          colab exec -s bev-train --timeout 18000 \
-            -f scripts/colab_train.py \
-            -- --data_zip /content/drive/MyDrive/${{ inputs.data_zip }} \
-               --epochs ${{ inputs.epochs }}
+          {
+            echo "import sys; sys.argv = ['colab_train.py', '--data_zip', '/content/drive/MyDrive/${{ inputs.data_zip }}', '--epochs', '${{ inputs.epochs }}']"
+            cat scripts/colab_train.py
+          } | colab exec -s bev-train --timeout 18000
 
       - name: Download checkpoint
         if: always()
