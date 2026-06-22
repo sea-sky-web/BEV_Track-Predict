@@ -38,9 +38,9 @@ jobs:
           printf '%s' "$COLAB_TOKEN_JSON" > ~/.config/colab-cli/token.json
           # 验证写入是否有效
           python3 - <<'EOF'
-          import json, sys
+          import json, sys, os
           try:
-              with open("/root/.config/colab-cli/token.json") as f:
+              with open(os.path.expanduser("~/.config/colab-cli/token.json")) as f:
                   d = json.load(f)
               assert d.get("refresh_token"), "refresh_token missing"
               print(f"[OK] token.json loaded, refresh_token present")
