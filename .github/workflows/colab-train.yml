@@ -3,10 +3,6 @@ name: Colab Training
 on:
   workflow_dispatch:
     inputs:
-      data_zip:
-        description: 'Drive 中 wildtrack.zip 的路径（相对于 MyDrive）'
-        default: 'Colab_Notebooks/dataSet/wildtrack.zip'
-        required: false
       epochs:
         description: '训练轮数'
         default: '10'
@@ -62,24 +58,14 @@ jobs:
           print("[OK] token.json constructed from refresh_token")
           EOF
 
-      # 拆分为 new → drivemount → exec 三步，因为 drive.mount() 在 exec 内不可用
       - name: Create Colab session
         run: colab new --gpu ${{ inputs.gpu }} --session bev-train
 
-      - name: Mount Google Drive
-        run: colab drivemount -s bev-train /content/drive
-
-      # 调试：查看 Drive 目录结构，确认 zip 路径
-      - name: List Drive contents
-        run: |
-          echo "ls /content/drive/MyDrive/" | colab exec -s bev-train --timeout 30 || true
-          echo "import os; [print(os.path.join(dp,f)) for dp,_,fn in os.walk('/content/drive/MyDrive/') for f in fn if 'wildtrack' in f.lower() or 'wild' in f.lower()][:20]" | colab exec -s bev-train --timeout 30 || true
-
-      # colab exec -f 不支持传参给脚本，用 stdin 注入变量后执行
+      # 用 gdown 从共享链接下载数据集，不再依赖 drive.mount()
       - name: Run training
         run: |
           {
-            echo "import sys; sys.argv = ['colab_train.py', '--data_zip', '/content/drive/MyDrive/${{ inputs.data_zip }}', '--epochs', '${{ inputs.epochs }}']"
+            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}']"
             cat scripts/colab_train.py
           } | colab exec -s bev-train --timeout 18000
 

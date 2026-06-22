@@ -2,13 +2,12 @@
 """
 Colab 训练启动脚本。
 
-前置条件（由 GitHub Actions workflow 或手动完成）：
-    colab new --gpu T4 -s bev-train
-    colab drivemount -s bev-train
-
 用法：
-    colab exec -s bev-train -f scripts/colab_train.py --timeout 18000 \
-        -- --data_zip /content/drive/MyDrive/Colab_Notebooks/dataSet/wildtrack.zip
+    # GitHub Actions（通过 stdin 注入 sys.argv）
+    echo "import sys; sys.argv = [...]" | cat - scripts/colab_train.py | colab exec -s bev-train
+
+    # Colab Notebook cell
+    !python /content/BEV_Track-Predict/scripts/colab_train.py
 """
 from __future__ import annotations
 
@@ -20,6 +19,7 @@ from pathlib import Path
 
 REPO_URL = "https://github.com/sea-sky-web/BEV_Track-Predict.git"
 REPO_DIR = Path("/content/BEV_Track-Predict")
+GDRIVE_FILE_ID = "1LDNFgAEq9wYWkbOPk4UdXQetBkhZSVfy"
 
 
 def run(cmd, cwd=None, check=True):
@@ -34,11 +34,10 @@ def banner(msg: str):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--data_zip",
-                    default="/content/drive/MyDrive/Colab_Notebooks/dataSet/wildtrack.zip",
-                    help="Drive 上 wildtrack.zip 的绝对路径")
+parser.add_argument("--gdrive_id", default=GDRIVE_FILE_ID,
+                    help="wildtrack.zip 的 Google Drive 文件 ID")
 parser.add_argument("--data_root", default=None,
-                    help="已解压的数据集路径（优先于 --data_zip）")
+                    help="已解压的数据集路径（跳过下载）")
 parser.add_argument("--epochs", type=int, default=10)
 parser.add_argument("--device", default="cuda")
 args = parser.parse_args()
@@ -52,7 +51,7 @@ else:
 
 os.chdir(str(REPO_DIR))
 
-# ── 2. 定位 / 解压数据集 ──────────────────────────────────────
+# ── 2. 下载并解压数据集 ───────────────────────────────────────
 banner("2/5  数据集准备")
 data_root = REPO_DIR / "wildtrack"
 
@@ -65,18 +64,25 @@ if args.data_root:
 elif data_root.is_dir() and (data_root / "Image_subsets").exists():
     print(f"[OK] 数据已存在：{data_root}")
 else:
-    # 清理可能存在的错误文件/目录
     run(["rm", "-rf", str(REPO_DIR / "wildtrack"), str(REPO_DIR / "wiltrack")], check=False)
 
-    zip_path = Path(args.data_zip)
-    if not zip_path.exists():
-        print(f"[ERROR] zip 不存在：{zip_path}")
-        print("请确认 Google Drive 已挂载且路径正确")
+    zip_path = REPO_DIR / "wildtrack.zip"
+    print(f"[INFO] 从 Google Drive 下载 wildtrack.zip (ID: {args.gdrive_id}) ...")
+    run([sys.executable, "-m", "pip", "install", "-q", "gdown"])
+    ret = run([
+        sys.executable, "-m", "gdown",
+        f"https://drive.google.com/uc?id={args.gdrive_id}",
+        "-O", str(zip_path),
+    ], check=False)
+    if ret != 0 or not zip_path.exists():
+        print("[ERROR] gdown 下载失败")
         sys.exit(1)
+    print(f"[OK] 下载完成：{zip_path} ({zip_path.stat().st_size / 1e9:.1f} GB)")
 
-    print(f"[OK] 解压 {zip_path} ...")
+    print("[INFO] 解压中 ...")
     run(["unzip", "-q", str(zip_path), "-d", str(REPO_DIR)])
-    print(f"[OK] 解压完成")
+    zip_path.unlink()
+    print("[OK] 解压完成，已删除 zip")
 
 # ── 3. 验证数据集 ─────────────────────────────────────────────
 banner("3/5  验证数据集结构")
@@ -86,7 +92,6 @@ for subdir in ["Image_subsets", "calibrations", "annotations_positions"]:
         print(f"  [OK] {subdir}")
     else:
         print(f"  [ERROR] 缺少：{subdir}")
-        # 看看解压出了什么
         run(["ls", "-la", str(REPO_DIR)], check=False)
         sys.exit(1)
 
