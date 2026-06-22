@@ -61,13 +61,81 @@ jobs:
       - name: Create Colab session
         run: colab new --gpu ${{ inputs.gpu }} --session bev-train
 
-      # 用 gdown 从共享链接下载数据集，不再依赖 drive.mount()
-      - name: Run training
+      # 1) 环境准备：clone、下载数据、安装依赖（短命令，不怕断连）
+      - name: Setup environment on Colab
         run: |
-          {
-            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}']"
-            cat scripts/colab_train.py
-          } | colab exec -s bev-train --timeout 18000
+          colab exec -s bev-train --timeout 600 <<'SETUP'
+          import subprocess, os
+          def run(cmd):
+              print(f">>> {cmd}", flush=True)
+              subprocess.check_call(cmd, shell=True)
+          run("git clone https://github.com/sea-sky-web/BEV_Track-Predict.git /content/BEV_Track-Predict || (cd /content/BEV_Track-Predict && git pull)")
+          run("pip install -q gdown")
+          if not os.path.exists("/content/BEV_Track-Predict/wildtrack/Image_subsets"):
+              run("gdown 1LDNFgAEq9wYWkbOPk4UdXQetBkhZSVfy -O /tmp/wildtrack.zip")
+              run("unzip -q -o /tmp/wildtrack.zip -d /content/BEV_Track-Predict/")
+          run("pip install -q -r /content/BEV_Track-Predict/requirements.txt 2>/dev/null || pip install -q torch torchvision numpy opencv-python-headless scipy")
+          print("[OK] Environment ready", flush=True)
+          SETUP
+
+      # 2) 后台启动训练（nohup），避免 WebSocket 长连接断开
+      - name: Start training (background)
+        run: |
+          colab exec -s bev-train --timeout 120 <<TRAIN
+          import subprocess
+          cmd = (
+              "cd /content/BEV_Track-Predict && "
+              "PYTHONUNBUFFERED=1 nohup python3 scripts/train_main.py "
+              "--data_root /content/BEV_Track-Predict/wildtrack "
+              "--views 0,1,2,3,4,5,6 --max_frames -1 "
+              "--epochs ${{ inputs.epochs }} --batch 1 --pretrained true "
+              "--backbone resnet18 --fusion_mode confidence_v2 "
+              "--augment true --augment_hflip_prob 0.0 "
+              "--augment_color_jitter 0.2,0.2,0.2,0.05 "
+              "--alpha 1.0 --optimizer adam --scheduler cosine "
+              "--lr_init 0.0001 --weight_decay 0.0001 "
+              "--freeze_backbone_epochs 3 --device cuda --log_every 20 "
+              "> /content/train.log 2>&1 &"
+          )
+          print(f">>> {cmd}", flush=True)
+          subprocess.Popen(cmd, shell=True)
+          import time; time.sleep(2)
+          subprocess.check_call("ps aux | grep train_main | grep -v grep || echo 'WARNING: process not found'", shell=True)
+          print("[OK] Training started in background", flush=True)
+          TRAIN
+
+      # 3) 轮询等待训练完成（每60秒检查一次）
+      - name: Wait for training
+        run: |
+          echo "Polling for training completion..."
+          for i in $(seq 1 60); do
+            sleep 60
+            # 检查 model_final.pth 是否生成
+            DONE=$(colab exec -s bev-train --timeout 30 <<'CHECK' 2>&1 || true
+          import os
+          log = "/content/train.log"
+          final = "/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3/model_final.pth"
+          if os.path.exists(final):
+              print("TRAINING_DONE")
+          elif os.path.exists(log):
+              lines = open(log).readlines()
+              for l in lines[-5:]:
+                  print(l.rstrip())
+          else:
+              print("Waiting for log file...")
+          CHECK
+            )
+            echo "[Poll $i/60] $DONE"
+            if echo "$DONE" | grep -q "TRAINING_DONE"; then
+              echo "Training completed!"
+              # 打印完整日志
+              colab exec -s bev-train --timeout 60 <<'LOG' || true
+          with open("/content/train.log") as f:
+              print(f.read())
+          LOG
+              break
+            fi
+          done
 
       - name: Download checkpoint
         if: always()
