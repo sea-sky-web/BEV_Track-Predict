@@ -471,7 +471,7 @@ def _print_detection_table(rows: Sequence[Dict[str, float]], best_threshold: flo
     print("\n" + "=" * 56)
     print("Detection Sweep (BEV)")
     print("=" * 56)
-    print("thr      precision  recall     f1         moda       modp(m)    loc_err(m)")
+    print("thr      precision  recall     f1         moda       modp       loc_err(m)")
     for row in rows:
         mark = "*" if abs(row["threshold"] - best_threshold) < 1e-12 else " "
         loc_m = "nan" if not np.isfinite(row["loc_err_m"]) else f"{row['loc_err_m']:.4f}"

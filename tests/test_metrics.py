@@ -19,7 +19,8 @@ def test_moda_modp_perfect_match():
     assert row["fp"] == 0.0
     assert row["fn"] == 0.0
     assert row["moda"] == 1.0
-    assert row["modp"] == 0.0
+    # Perfect match: all distances = 0 → MODP = mean(1 - 0/0.5) = 1.0
+    assert row["modp"] == 1.0
 
 
 def test_moda_penalizes_false_positive_and_miss():

@@ -75,7 +75,8 @@ def compute_moda_modp(
     tp = int(match_dists.shape[0])
     fp = n_pred - tp
     fn = n_gt - tp
-    modp_sum = float(match_dists.sum())
+    # MODP = mean(1 - d_i / d_thresh) over matched pairs, range [0, 1]
+    modp_sum = float((1.0 - match_dists / d_thresh).sum())
     moda = 1.0 - float(fp + fn) / float(n_gt) if n_gt > 0 else (1.0 if fp == 0 else 0.0)
     modp = modp_sum / float(tp) if tp > 0 else 0.0
 
