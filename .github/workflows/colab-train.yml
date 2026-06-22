@@ -1,0 +1,80 @@
+name: Colab Training
+
+# 手动触发，可配置参数
+on:
+  workflow_dispatch:
+    inputs:
+      drive_path:
+        description: 'Wildtrack 在 Google Drive MyDrive 下的路径（相对）'
+        default: 'wildtrack'
+        required: false
+      epochs:
+        description: '训练轮数'
+        default: '10'
+        required: false
+      gpu:
+        description: 'GPU 型号（T4 / L4 / A100）'
+        default: 'T4'
+        required: false
+
+jobs:
+  train:
+    name: Train on Colab ${{ inputs.gpu }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360          # 最长 6 小时，Colab 免费 T4 单次约 12h
+
+    steps:
+      # ── 1. 检出代码 ─────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. 安装 colab-cli ────────────────────────────────────────
+      - name: Install colab-cli
+        run: pip install google-colab-cli
+
+      # ── 3. 恢复 OAuth token（唯一需要持久化的状态）────────────────
+      #   在仓库 Settings → Secrets → Actions 中新增：
+      #   名称：COLAB_TOKEN_JSON
+      #   值：  ~/.config/colab-cli/token.json 的全部内容
+      - name: Restore Colab credentials
+        run: |
+          mkdir -p ~/.config/colab-cli
+          echo '${{ secrets.COLAB_TOKEN_JSON }}' > ~/.config/colab-cli/token.json
+
+      # ── 4. 启动 Colab VM 并运行训练脚本 ─────────────────────────
+      #   colab run 的 SCRIPT_ARGS 会原样传给 colab_train.py (sys.argv)
+      #   --keep 让 VM 在脚本结束后保持存活，供后续 download 使用
+      - name: Run training on Colab
+        run: |
+          colab run \
+            --gpu ${{ inputs.gpu }} \
+            --keep \
+            --session bev-train \
+            --timeout 18000 \
+            scripts/colab_train.py \
+            --data_root /content/drive/MyDrive/${{ inputs.drive_path }} \
+            --epochs ${{ inputs.epochs }}
+
+      # ── 5. 下载训练产物 ──────────────────────────────────────────
+      - name: Download checkpoint
+        if: always()
+        run: |
+          REMOTE="/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3"
+          colab download -s bev-train "$REMOTE/model_final.pth" ./model_final.pth || true
+          colab download -s bev-train "$REMOTE/metrics.csv"    ./metrics.csv      || true
+
+      # ── 6. 上传为 GitHub Artifact ────────────────────────────────
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bev-checkpoint-run${{ github.run_number }}
+          path: |
+            model_final.pth
+            metrics.csv
+          if-no-files-found: warn
+
+      # ── 7. 释放 VM（always 确保即使训练失败也释放）────────────────
+      - name: Stop Colab session
+        if: always()
+        run: colab stop -s bev-train || true
