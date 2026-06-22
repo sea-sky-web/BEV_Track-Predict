@@ -199,23 +199,19 @@ class MVDetTrainer:
             # 前向传播
             with torch.amp.autocast("cuda", enabled=self.amp_enabled):
                 map_logits, imgs_logits = self.model(x_views)
-                map_res = torch.sigmoid(map_logits)
-                imgs_res = torch.sigmoid(imgs_logits)
                 
-                # BEV 损失
-                bev_loss = self.bev_criterion(map_res, map_gt, map_kernel)
+                # MVDet: loss 直接在 raw logits 上计算，不经过 sigmoid
+                bev_loss = self.bev_criterion(map_logits, map_gt, map_kernel)
                 
-                # 图像损失（逐视角求和）
                 per_view_loss = 0.0
-                for vi in range(imgs_res.shape[1]):
+                for vi in range(imgs_logits.shape[1]):
                     per_view_loss = per_view_loss + self.img_criterion(
-                        imgs_res[:, vi],
+                        imgs_logits[:, vi],
                         imgs_gt[:, vi],
                         img_kernel
                     )
-                per_view_loss = per_view_loss / float(imgs_res.shape[1])
+                per_view_loss = per_view_loss / float(imgs_logits.shape[1])
                 
-                # 总损失
                 loss = bev_loss + alpha * per_view_loss
             
             if not torch.isfinite(loss):
@@ -224,7 +220,7 @@ class MVDetTrainer:
                     raw_max = float(torch.nan_to_num(map_logits[0, 0], nan=0.0).max().item())
                     print(
                         f"[step {self.global_step}] non-finite loss detected, skip update "
-                        f"(bev={bev_loss.item()}, img={per_view_loss.item():.6f}, "
+                        f"(bev={bev_loss.item():.6f}, img={per_view_loss.item():.6f}, "
                         f"pred_raw=[{raw_min:.3f},{raw_max:.3f}])"
                     )
                 self.global_step += 1
@@ -249,9 +245,11 @@ class MVDetTrainer:
             bev_losses.append(bev_loss.item())
             img_losses.append(per_view_loss.item())
             
-            # 计算指标（不需要梯度）
+            # 计算指标（sigmoid 仅用于监控，不参与 loss）
             with torch.no_grad():
-                # 正样本 MSE
+                map_res = torch.sigmoid(map_logits)
+                imgs_res = torch.sigmoid(imgs_logits)
+                
                 pooled_gt = F.adaptive_max_pool2d(map_gt, output_size=map_res.shape[-2:])
                 pos_mask = pooled_gt > 0.1
                 pos_mse = (
@@ -342,19 +340,17 @@ class MVDetTrainer:
                 imgs_gt = imgs_gt.to(self.device, non_blocking=True)
                 
                 map_logits, imgs_logits = self.model(x_views)
-                map_res = torch.sigmoid(map_logits)
-                imgs_res = torch.sigmoid(imgs_logits)
                 
-                bev_loss = self.bev_criterion(map_res, map_gt, map_kernel)
+                bev_loss = self.bev_criterion(map_logits, map_gt, map_kernel)
                 
                 per_view_loss = 0.0
-                for vi in range(imgs_res.shape[1]):
+                for vi in range(imgs_logits.shape[1]):
                     per_view_loss = per_view_loss + self.img_criterion(
-                        imgs_res[:, vi],
+                        imgs_logits[:, vi],
                         imgs_gt[:, vi],
                         img_kernel
                     )
-                per_view_loss = per_view_loss / float(imgs_res.shape[1])
+                per_view_loss = per_view_loss / float(imgs_logits.shape[1])
                 
                 loss = bev_loss + alpha * per_view_loss
                 
