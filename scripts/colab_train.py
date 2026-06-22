@@ -25,8 +25,18 @@ GDRIVE_FILE_ID = "1LDNFgAEq9wYWkbOPk4UdXQetBkhZSVfy"
 def run(cmd, cwd=None, check=True):
     if isinstance(cmd, str):
         cmd = cmd.split()
-    print(f"\n>>> {' '.join(str(c) for c in cmd)}")
-    return subprocess.run(cmd, cwd=cwd, check=check).returncode
+    print(f"\n>>> {' '.join(str(c) for c in cmd)}", flush=True)
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            bufsize=1, text=True)
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+    proc.wait()
+    if check and proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+    return proc.returncode
 
 
 def banner(msg: str):
