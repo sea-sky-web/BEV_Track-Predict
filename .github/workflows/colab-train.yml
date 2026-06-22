@@ -29,23 +29,24 @@ jobs:
       - name: Install colab-cli
         run: pip install google-colab-cli
 
-      # 用环境变量传递 Secret，避免 shell 对 JSON 中特殊字符的转义问题
+      # 用 Python 规范化写入，避免 Secret 尾部换行/空白导致 JSON 解析失败
       - name: Restore Colab credentials
         env:
           COLAB_TOKEN_JSON: ${{ secrets.COLAB_TOKEN_JSON }}
         run: |
           mkdir -p ~/.config/colab-cli
-          printf '%s' "$COLAB_TOKEN_JSON" > ~/.config/colab-cli/token.json
-          # 验证写入是否有效
           python3 - <<'EOF'
           import json, sys, os
+          raw = os.environ["COLAB_TOKEN_JSON"]
           try:
-              with open(os.path.expanduser("~/.config/colab-cli/token.json")) as f:
-                  d = json.load(f)
+              d = json.loads(raw.strip())
               assert d.get("refresh_token"), "refresh_token missing"
-              print(f"[OK] token.json loaded, refresh_token present")
+              path = os.path.expanduser("~/.config/colab-cli/token.json")
+              with open(path, "w") as f:
+                  json.dump(d, f)
+              print("[OK] token.json written, refresh_token present")
           except Exception as e:
-              print(f"[ERROR] token.json invalid: {e}", file=sys.stderr)
+              print(f"[ERROR] {e}", file=sys.stderr)
               sys.exit(1)
           EOF
 
