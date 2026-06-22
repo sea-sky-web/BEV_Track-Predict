@@ -9,7 +9,7 @@ torch = pytest.importorskip("torch")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from geometry import (
+from geometry import (  # noqa: E402
     compute_valid_ratio_from_homography,
     make_worldgrid2worldcoord_mat,
     warp_perspective_torch,
@@ -26,13 +26,16 @@ def test_worldgrid_transform_uses_cell_centers():
 
 
 def test_valid_ratio_identity_is_full_coverage():
-    ratio = compute_valid_ratio_from_homography(np.eye(3), src_hw=(4, 4), dst_hw=(4, 4))
+    ratio = compute_valid_ratio_from_homography(
+        np.eye(3), src_hw=(4, 4), dst_hw=(4, 4))
     assert ratio == 1.0
 
 
 def test_warp_perspective_identity_matches_input():
     src = torch.arange(16, dtype=torch.float32).reshape(1, 1, 4, 4)
-    out = warp_perspective_torch(src, torch.eye(3), dsize=(4, 4), min_valid_ratio=1.0)
+    out = warp_perspective_torch(
+        src, torch.eye(3), dsize=(
+            4, 4), min_valid_ratio=1.0)
     assert torch.allclose(out, src)
 
 
