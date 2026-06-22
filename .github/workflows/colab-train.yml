@@ -29,25 +29,41 @@ jobs:
       - name: Install colab-cli
         run: pip install google-colab-cli
 
-      # 用 Python 规范化写入，避免 Secret 尾部换行/空白导致 JSON 解析失败
+      # Secret 只需存 refresh_token 字符串（不是 JSON），避免所有格式问题
+      # 在仓库 Settings → Secrets → Actions 中新增：
+      #   名称：COLAB_REFRESH_TOKEN
+      #   值：  ~/.config/colab-cli/token.json 里 "refresh_token" 字段的值
       - name: Restore Colab credentials
         env:
-          COLAB_TOKEN_JSON: ${{ secrets.COLAB_TOKEN_JSON }}
+          COLAB_REFRESH_TOKEN: ${{ secrets.COLAB_REFRESH_TOKEN }}
         run: |
-          mkdir -p ~/.config/colab-cli
           python3 - <<'EOF'
-          import json, sys, os
-          raw = os.environ["COLAB_TOKEN_JSON"]
-          try:
-              d = json.loads(raw.strip())
-              assert d.get("refresh_token"), "refresh_token missing"
-              path = os.path.expanduser("~/.config/colab-cli/token.json")
-              with open(path, "w") as f:
-                  json.dump(d, f)
-              print("[OK] token.json written, refresh_token present")
-          except Exception as e:
-              print(f"[ERROR] {e}", file=sys.stderr)
-              sys.exit(1)
+          import json, os
+          token = os.environ["COLAB_REFRESH_TOKEN"].strip()
+          assert token, "COLAB_REFRESH_TOKEN is empty"
+          creds = {
+              "token": None,
+              "refresh_token": token,
+              "token_uri": "https://oauth2.googleapis.com/token",
+              "client_id": "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
+              "client_secret": "d-FL95Q19q7MQmFpd7hHD0Ty",
+              "scopes": [
+                  "openid",
+                  "https://www.googleapis.com/auth/userinfo.profile",
+                  "https://www.googleapis.com/auth/userinfo.email",
+                  "https://www.googleapis.com/auth/cloud-platform",
+                  "https://www.googleapis.com/auth/colaboratory",
+                  "https://www.googleapis.com/auth/drive.file"
+              ],
+              "universe_domain": "googleapis.com",
+              "account": "",
+              "expiry": None
+          }
+          path = os.path.expanduser("~/.config/colab-cli/token.json")
+          os.makedirs(os.path.dirname(path), exist_ok=True)
+          with open(path, "w") as f:
+              json.dump(creds, f)
+          print("[OK] token.json constructed from refresh_token")
           EOF
 
       - name: Run training on Colab
