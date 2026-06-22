@@ -1,6 +1,5 @@
 name: Colab Training
 
-# 手动触发，可配置参数
 on:
   workflow_dispatch:
     inputs:
@@ -21,29 +20,35 @@ jobs:
   train:
     name: Train on Colab ${{ inputs.gpu }}
     runs-on: ubuntu-latest
-    timeout-minutes: 360          # 最长 6 小时，Colab 免费 T4 单次约 12h
+    timeout-minutes: 360
 
     steps:
-      # ── 1. 检出代码 ─────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. 安装 colab-cli ────────────────────────────────────────
       - name: Install colab-cli
         run: pip install google-colab-cli
 
-      # ── 3. 恢复 OAuth token（唯一需要持久化的状态）────────────────
-      #   在仓库 Settings → Secrets → Actions 中新增：
-      #   名称：COLAB_TOKEN_JSON
-      #   值：  ~/.config/colab-cli/token.json 的全部内容
+      # 用环境变量传递 Secret，避免 shell 对 JSON 中特殊字符的转义问题
       - name: Restore Colab credentials
+        env:
+          COLAB_TOKEN_JSON: ${{ secrets.COLAB_TOKEN_JSON }}
         run: |
           mkdir -p ~/.config/colab-cli
-          echo '${{ secrets.COLAB_TOKEN_JSON }}' > ~/.config/colab-cli/token.json
+          printf '%s' "$COLAB_TOKEN_JSON" > ~/.config/colab-cli/token.json
+          # 验证写入是否有效
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              with open("/root/.config/colab-cli/token.json") as f:
+                  d = json.load(f)
+              assert d.get("refresh_token"), "refresh_token missing"
+              print(f"[OK] token.json loaded, refresh_token present")
+          except Exception as e:
+              print(f"[ERROR] token.json invalid: {e}", file=sys.stderr)
+              sys.exit(1)
+          EOF
 
-      # ── 4. 启动 Colab VM 并运行训练脚本 ─────────────────────────
-      #   colab run 的 SCRIPT_ARGS 会原样传给 colab_train.py (sys.argv)
-      #   --keep 让 VM 在脚本结束后保持存活，供后续 download 使用
       - name: Run training on Colab
         run: |
           colab run \
@@ -55,7 +60,6 @@ jobs:
             --data_root /content/drive/MyDrive/${{ inputs.drive_path }} \
             --epochs ${{ inputs.epochs }}
 
-      # ── 5. 下载训练产物 ──────────────────────────────────────────
       - name: Download checkpoint
         if: always()
         run: |
@@ -63,7 +67,6 @@ jobs:
           colab download -s bev-train "$REMOTE/model_final.pth" ./model_final.pth || true
           colab download -s bev-train "$REMOTE/metrics.csv"    ./metrics.csv      || true
 
-      # ── 6. 上传为 GitHub Artifact ────────────────────────────────
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -74,7 +77,6 @@ jobs:
             metrics.csv
           if-no-files-found: warn
 
-      # ── 7. 释放 VM（always 确保即使训练失败也释放）────────────────
       - name: Stop Colab session
         if: always()
         run: colab stop -s bev-train || true
