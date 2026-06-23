@@ -131,7 +131,7 @@ train_cmd = [
     "--scheduler",              "cosine",
     "--lr_init",                "0.0001",
     "--weight_decay",           "0.0001",
-    "--freeze_backbone_epochs", "3",
+    "--freeze_backbone_epochs", "0",
     "--device",                 args.device,
     "--log_every",              "20",
 ]
