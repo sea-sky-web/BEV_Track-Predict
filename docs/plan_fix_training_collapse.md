@@ -128,6 +128,39 @@
 
 ---
 
+## Step 3 验证结果（2026-06-23）
+
+**Commits**: `0b7a6bc` + `a17b25b`（修正 colab_train.py 硬编码）
+**Actions Run**: https://github.com/sea-sky-web/BEV_Track-Predict/actions/runs/28004299926
+**GPU**: A100, 10 epochs
+
+**修改内容**：`freeze_backbone_epochs = 3 → 0`（config.py + colab_train.py CLI 参数）
+
+### 关键指标对比（vs Step 2）
+
+| 指标 | Step 2 | Step 3 | 判定 |
+|------|--------|--------|------|
+| pos_mse 最佳 | ~0.094 | ~0.102 | ⚠️ 略逊 |
+| loss epoch 9 | 0.021 | **0.018** | ✅ 更低 |
+| Epoch 3 回弹 | **有**（0.039→0.042） | **无**（0.037→0.033） | ✅ 消除中断 |
+
+### 结论
+
+Step 3 消除了 backbone 解冻中断，最终 loss 更低。pos_mse 略逊于 Step 2，说明 10 epochs 内 backbone 自由度增加但未充分收敛。
+
+---
+
+## 三步修复总结
+
+| 步骤 | 修改 | pos_mse | 效果 |
+|------|------|---------|------|
+| 修复前 | — | ~1.0 | 完全不可用 |
+| Step 1 | 移除 sigmoid | ~0.14 | 消除坍缩 |
+| Step 2 | 对齐高斯核 | ~0.094 | 精度 +33% |
+| Step 3 | 取消 backbone 冻结 | ~0.102（loss 更低） | 训练更平滑 |
+
+---
+
 ## 不做的事
 
 - 不改 loss 类型（保持 GaussianMSE）
