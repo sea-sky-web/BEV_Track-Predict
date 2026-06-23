@@ -71,7 +71,7 @@ jobs:
           {
             echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}']"
             cat scripts/colab_train.py
-          } | colab exec -s bev-train --timeout 18000
+          } | colab exec -s bev-train --timeout 2400
 
       - name: Download checkpoint
         if: always()
