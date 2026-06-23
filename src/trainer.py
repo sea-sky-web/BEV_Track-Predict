@@ -190,7 +190,6 @@ class MVDetTrainer:
         raw_pos_mses = []
         raw_neg_mses = []
         snrs = []
-        aux_raw_pos_mses = []
         
         for batch_idx, (stems, x_views, map_gt, imgs_gt) in enumerate(train_loader):
             x_views = x_views.to(self.device, non_blocking=True)
@@ -273,23 +272,6 @@ class MVDetTrainer:
                 raw_pos_mses.append(raw_pos_mse)
                 raw_neg_mses.append(raw_neg_mse)
                 snrs.append(snr)
-
-                # 辅助指标（图像热图）
-                _imgs_gt_pool = F.adaptive_max_pool2d(
-                    imgs_gt.reshape(-1, 1, *imgs_gt.shape[-2:]),
-                    output_size=imgs_logits.shape[-2:],
-                ).reshape(imgs_gt.shape[0], imgs_gt.shape[1], 1, *imgs_logits.shape[-2:])
-                _ik = img_kernel.to(dtype=_imgs_gt_pool.dtype, device=_imgs_gt_pool.device)
-                _ipad = (_ik.shape[-1] - 1) // 2
-                _flat = _imgs_gt_pool.reshape(-1, 1, *imgs_logits.shape[-2:])
-                _smoothed_img = F.conv2d(_flat, _ik, padding=_ipad).reshape_as(_imgs_gt_pool)
-                aux_pos_mask = _smoothed_img > 0.1
-                aux_raw_pos_mse = (
-                    ((imgs_logits.unsqueeze(2) - _smoothed_img) ** 2)[aux_pos_mask].mean().item()
-                    if aux_pos_mask.any()
-                    else float("nan")
-                )
-                aux_raw_pos_mses.append(aux_raw_pos_mse)
             
             # 定期打印日志
             if batch_idx % log_every == 0:
