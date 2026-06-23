@@ -174,8 +174,9 @@ class MVDetTrainer:
                 - "loss": 平均总损失
                 - "bev_loss": 平均 BEV 损失
                 - "img_loss": 平均图像损失
-                - "pos_mse": 正样本 MSE
-                - "aux_pos_mse": 辅助正样本 MSE
+                - "raw_pos_mse": 正样本区域 raw logits vs smoothed GT 的 MSE
+                - "raw_neg_mse": 背景区域 raw logits vs smoothed GT 的 MSE
+                - "snr": 信噪比（正样本 logit 均值 - 背景 logit 均值）
         """
         self.model.train()
         self._apply_backbone_freeze(epoch)
@@ -186,8 +187,10 @@ class MVDetTrainer:
         losses = []
         bev_losses = []
         img_losses = []
-        pos_mses = []
-        aux_pos_mses = []
+        raw_pos_mses = []
+        raw_neg_mses = []
+        snrs = []
+        aux_raw_pos_mses = []
         
         for batch_idx, (stems, x_views, map_gt, imgs_gt) in enumerate(train_loader):
             x_views = x_views.to(self.device, non_blocking=True)
@@ -245,28 +248,48 @@ class MVDetTrainer:
             bev_losses.append(bev_loss.item())
             img_losses.append(per_view_loss.item())
             
-            # 计算指标（sigmoid 仅用于监控，不参与 loss）
+            # 计算指标（raw logits vs Gaussian-smoothed GT，与 loss 同空间）
             with torch.no_grad():
-                map_res = torch.sigmoid(map_logits)
-                imgs_res = torch.sigmoid(imgs_logits)
-                
-                pooled_gt = F.adaptive_max_pool2d(map_gt, output_size=map_res.shape[-2:])
-                pos_mask = pooled_gt > 0.1
-                pos_mse = (
-                    ((map_res - pooled_gt) ** 2)[pos_mask].mean().item()
-                    if pos_mask.any()
+                B, C, H, W = map_logits.shape
+                pooled_gt = F.adaptive_max_pool2d(map_gt, output_size=(H, W))
+
+                # 构建 Gaussian-smoothed GT（复现 loss 内部的目标）
+                _tgt = pooled_gt.reshape(B * C, 1, H, W)
+                _k = map_kernel.to(dtype=_tgt.dtype, device=_tgt.device)
+                _pad = (_k.shape[-1] - 1) // 2
+                smoothed_gt = F.conv2d(_tgt, _k, padding=_pad).reshape(B, C, H, W)
+
+                pos_mask = smoothed_gt > 0.1
+                neg_mask = smoothed_gt < 0.01
+                diff2 = (map_logits - smoothed_gt) ** 2
+
+                raw_pos_mse = diff2[pos_mask].mean().item() if pos_mask.any() else float("nan")
+                raw_neg_mse = diff2[neg_mask].mean().item() if neg_mask.any() else float("nan")
+                snr = (
+                    (map_logits[pos_mask].mean() - map_logits[neg_mask].mean()).item()
+                    if pos_mask.any() and neg_mask.any()
                     else float("nan")
                 )
-                pos_mses.append(pos_mse)
-                
-                # 辅助正样本 MSE
-                aux_pos_mask = imgs_gt > 0.1
-                aux_pos_mse = (
-                    ((imgs_res - imgs_gt) ** 2)[aux_pos_mask].mean().item()
+                raw_pos_mses.append(raw_pos_mse)
+                raw_neg_mses.append(raw_neg_mse)
+                snrs.append(snr)
+
+                # 辅助指标（图像热图）
+                _imgs_gt_pool = F.adaptive_max_pool2d(
+                    imgs_gt.reshape(-1, 1, *imgs_gt.shape[-2:]),
+                    output_size=imgs_logits.shape[-2:],
+                ).reshape(imgs_gt.shape[0], imgs_gt.shape[1], 1, *imgs_logits.shape[-2:])
+                _ik = img_kernel.to(dtype=_imgs_gt_pool.dtype, device=_imgs_gt_pool.device)
+                _ipad = (_ik.shape[-1] - 1) // 2
+                _flat = _imgs_gt_pool.reshape(-1, 1, *imgs_logits.shape[-2:])
+                _smoothed_img = F.conv2d(_flat, _ik, padding=_ipad).reshape_as(_imgs_gt_pool)
+                aux_pos_mask = _smoothed_img > 0.1
+                aux_raw_pos_mse = (
+                    ((imgs_logits.unsqueeze(2) - _smoothed_img) ** 2)[aux_pos_mask].mean().item()
                     if aux_pos_mask.any()
                     else float("nan")
                 )
-                aux_pos_mses.append(aux_pos_mse)
+                aux_raw_pos_mses.append(aux_raw_pos_mse)
             
             # 定期打印日志
             if batch_idx % log_every == 0:
@@ -281,8 +304,9 @@ class MVDetTrainer:
                     f"loss={loss.item():.6f} "
                     f"bev={bev_loss.item():.6f} "
                     f"img={per_view_loss.item():.6f} "
-                    f"pos_mse={pos_mse:.6f} "
-                    f"aux_pos_mse={aux_pos_mse:.6f} "
+                    f"raw_pos_mse={raw_pos_mse:.6f} "
+                    f"raw_neg_mse={raw_neg_mse:.6f} "
+                    f"snr={snr:.3f} "
                     f"pred_raw=[{raw_min:.3f},{raw_max:.3f}] "
                     f"mean={mean_raw:.3f} max_gt={max_gt:.3f} "
                     f"lr={lr:.5f}"
@@ -296,16 +320,18 @@ class MVDetTrainer:
                 "loss": float("nan"),
                 "bev_loss": float("nan"),
                 "img_loss": float("nan"),
-                "pos_mse": float("nan"),
-                "aux_pos_mse": float("nan"),
+                "raw_pos_mse": float("nan"),
+                "raw_neg_mse": float("nan"),
+                "snr": float("nan"),
             }
 
         return {
             "loss": np.mean(losses),
             "bev_loss": np.mean(bev_losses),
             "img_loss": np.mean(img_losses),
-            "pos_mse": np.nanmean(pos_mses),
-            "aux_pos_mse": np.nanmean(aux_pos_mses),
+            "raw_pos_mse": np.nanmean(raw_pos_mses),
+            "raw_neg_mse": np.nanmean(raw_neg_mses),
+            "snr": np.nanmean(snrs),
         }
     
     def validate(
@@ -332,6 +358,9 @@ class MVDetTrainer:
         losses = []
         bev_losses = []
         img_losses = []
+        raw_pos_mses = []
+        raw_neg_mses = []
+        snrs = []
         
         with torch.no_grad():
             for stems, x_views, map_gt, imgs_gt in val_loader:
@@ -357,11 +386,34 @@ class MVDetTrainer:
                 losses.append(loss.item())
                 bev_losses.append(bev_loss.item())
                 img_losses.append(per_view_loss.item())
+
+                # 与 train_epoch 一致的检测指标
+                B, C, H, W = map_logits.shape
+                pooled_gt = F.adaptive_max_pool2d(map_gt, output_size=(H, W))
+                _tgt = pooled_gt.reshape(B * C, 1, H, W)
+                _k = map_kernel.to(dtype=_tgt.dtype, device=_tgt.device)
+                _pad = (_k.shape[-1] - 1) // 2
+                smoothed_gt = F.conv2d(_tgt, _k, padding=_pad).reshape(B, C, H, W)
+
+                pos_mask = smoothed_gt > 0.1
+                neg_mask = smoothed_gt < 0.01
+                diff2 = (map_logits - smoothed_gt) ** 2
+
+                raw_pos_mses.append(diff2[pos_mask].mean().item() if pos_mask.any() else float("nan"))
+                raw_neg_mses.append(diff2[neg_mask].mean().item() if neg_mask.any() else float("nan"))
+                snrs.append(
+                    (map_logits[pos_mask].mean() - map_logits[neg_mask].mean()).item()
+                    if pos_mask.any() and neg_mask.any()
+                    else float("nan")
+                )
         
         return {
             "loss": np.mean(losses),
             "bev_loss": np.mean(bev_losses),
             "img_loss": np.mean(img_losses),
+            "raw_pos_mse": np.nanmean(raw_pos_mses),
+            "raw_neg_mse": np.nanmean(raw_neg_mses),
+            "snr": np.nanmean(snrs),
         }
     
     def save_checkpoint(self, epoch: int, best: bool = False):

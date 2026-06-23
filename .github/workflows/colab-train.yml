@@ -11,6 +11,10 @@ on:
         description: 'GPU 型号（T4 / L4 / A100）'
         default: 'T4'
         required: false
+      bev_pos_weight:
+        description: 'BEV 正样本损失权重（抬高行人响应）'
+        default: '10.0'
+        required: false
 
 jobs:
   train:
@@ -65,7 +69,7 @@ jobs:
       - name: Run training
         run: |
           {
-            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}']"
+            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}']"
             cat scripts/colab_train.py
           } | colab exec -s bev-train --timeout 18000
 

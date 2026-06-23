@@ -16,7 +16,8 @@ from config import (
     DEFAULT_VIEWS, DEFAULT_MAX_FRAMES, DEFAULT_EPOCHS, DEFAULT_BATCH_SIZE,
     DEFAULT_BACKBONE, DEFAULT_BEV_DOWN, DEFAULT_FEAT_H, DEFAULT_FEAT_W,
     DEFAULT_IMG_H, DEFAULT_IMG_W, DEFAULT_PERSON_H,
-    DEFAULT_ALPHA, DEFAULT_MAP_KSIZE, DEFAULT_MAP_SIGMA,
+    DEFAULT_ALPHA, DEFAULT_BEV_POS_WEIGHT, DEFAULT_BEV_NEG_WEIGHT,
+    DEFAULT_MAP_KSIZE, DEFAULT_MAP_SIGMA,
     DEFAULT_IMG_KSIZE, DEFAULT_IMG_SIGMA, DEFAULT_PRETRAINED,
     DEFAULT_FREEZE_BN, DEFAULT_AMP_ENABLED, DEFAULT_DEVICE,
     DEFAULT_OPTIMIZER, DEFAULT_SCHEDULER, DEFAULT_MAX_LR, DEFAULT_LR_INIT,
@@ -95,9 +96,9 @@ def parse_args():
                     help="人体高度（米）")
     ap.add_argument("--alpha", type=float, default=DEFAULT_ALPHA,
                     help="图像损失权重")
-    ap.add_argument("--bev_pos_weight", type=float, default=1.0,
+    ap.add_argument("--bev_pos_weight", type=float, default=DEFAULT_BEV_POS_WEIGHT,
                     help="BEV 热图正样本 Gaussian MSE 权重")
-    ap.add_argument("--bev_neg_weight", type=float, default=1.0,
+    ap.add_argument("--bev_neg_weight", type=float, default=DEFAULT_BEV_NEG_WEIGHT,
                     help="BEV 热图负样本 Gaussian MSE 权重")
     ap.add_argument("--img_pos_weight", type=float, default=1.0,
                     help="图像热图正样本 Gaussian MSE 权重")
@@ -396,7 +397,9 @@ def main():
         print(f"[Epoch {ep}] "
               f"loss={epoch_stats['loss']:.6f} "
               f"bev={epoch_stats['bev_loss']:.6f} "
-              f"img={epoch_stats['img_loss']:.6f}")
+              f"img={epoch_stats['img_loss']:.6f} "
+              f"raw_pos_mse={epoch_stats['raw_pos_mse']:.6f} "
+              f"snr={epoch_stats['snr']:.3f}")
         
         # 保存检查点
         if (ep + 1) % 5 == 0:
