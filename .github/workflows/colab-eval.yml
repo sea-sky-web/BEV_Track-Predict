@@ -1,0 +1,146 @@
+name: Colab Evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      train_run_id:
+        description: '训练 run ID（下载 model_final.pth artifact）'
+        required: true
+      gpu:
+        description: 'GPU 型号（T4 / L4 / A100）'
+        default: 'T4'
+        required: false
+
+jobs:
+  eval:
+    name: Evaluate on Colab ${{ inputs.gpu }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install colab-cli
+        run: pip install google-colab-cli
+
+      - name: Restore Colab credentials
+        env:
+          COLAB_REFRESH_TOKEN: ${{ secrets.COLAB_REFRESH_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          token = os.environ["COLAB_REFRESH_TOKEN"].strip()
+          assert token, "COLAB_REFRESH_TOKEN is empty"
+          creds = {
+              "token": None,
+              "refresh_token": token,
+              "token_uri": "https://oauth2.googleapis.com/token",
+              "client_id": "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
+              "client_secret": "d-FL95Q19q7MQmFpd7hHD0Ty",
+              "scopes": [
+                  "openid",
+                  "https://www.googleapis.com/auth/userinfo.profile",
+                  "https://www.googleapis.com/auth/userinfo.email",
+                  "https://www.googleapis.com/auth/cloud-platform",
+                  "https://www.googleapis.com/auth/colaboratory",
+                  "https://www.googleapis.com/auth/drive.file"
+              ],
+              "universe_domain": "googleapis.com",
+              "account": "",
+              "expiry": None
+          }
+          path = os.path.expanduser("~/.config/colab-cli/token.json")
+          os.makedirs(os.path.dirname(path), exist_ok=True)
+          with open(path, "w") as f:
+              json.dump(creds, f)
+          print("[OK] token.json constructed from refresh_token")
+          EOF
+
+      - name: Download training artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bev-checkpoint-run${{ inputs.train_run_id }}
+          run-id: ${{ inputs.train_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Check model file
+        id: check_model
+        run: |
+          if [ -f model_final.pth ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "[OK] model_final.pth found ($(du -h model_final.pth | cut -f1))"
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "[WARN] model_final.pth not found, will use default from repo"
+          fi
+
+      - name: Create Colab session
+        run: colab new --gpu ${{ inputs.gpu }} --session bev-eval
+
+      - name: Upload model to Colab
+        if: steps.check_model.outputs.found == 'true'
+        run: |
+          colab upload -s bev-eval model_final.pth /content/model_final.pth || true
+
+      - name: Run evaluation
+        run: |
+          {
+            if [ "${{ steps.check_model.outputs.found }}" == "true" ]; then
+              echo "import sys; sys.argv = ['colab_eval.py', '--model_path', '/content/model_final.pth']"
+            else
+              echo "import sys; sys.argv = ['colab_eval.py']"
+            fi
+            cat scripts/colab_eval.py
+          } | colab exec -s bev-eval --timeout 3600
+
+      - name: Download results
+        if: always()
+        run: |
+          REMOTE="/content/BEV_Track-Predict/outputs"
+          colab download -s bev-eval "$REMOTE/eval_results.json"           ./eval_results.json    || true
+          colab download -s bev-eval "$REMOTE/visualization/bev_prediction.png" ./bev_prediction.png || true
+          colab download -s bev-eval "$REMOTE/visualization/bev_overlay.png"    ./bev_overlay.png    || true
+
+      - name: Print results summary
+        if: always()
+        run: |
+          if [ -f eval_results.json ]; then
+            python3 -c "
+          import json
+          r = json.load(open('eval_results.json'))
+          print('=' * 50)
+          print('EVALUATION RESULTS')
+          print('=' * 50)
+          for k in ['loss','pos_mse','aux_pos_mse']:
+              print(f'{k:20s}: {r.get(k, \"N/A\"):.6f}' if isinstance(r.get(k), (int,float)) else f'{k:20s}: N/A')
+          if 'det_moda' in r:
+              print('-' * 50)
+              print(f'{\"MODA\":20s}: {r[\"det_moda\"]:.4f}')
+              print(f'{\"MODP\":20s}: {r[\"det_modp\"]:.4f}')
+              print(f'{\"Precision\":20s}: {r[\"det_precision\"]:.4f}')
+              print(f'{\"Recall\":20s}: {r[\"det_recall\"]:.4f}')
+              print(f'{\"F1\":20s}: {r[\"det_f1\"]:.4f}')
+              print(f'{\"Best Threshold\":20s}: {r[\"det_best_threshold\"]:.2f}')
+              print(f'{\"TP/FP/FN\":20s}: {int(r[\"det_moda_tp\"])}/{int(r[\"det_moda_fp\"])}/{int(r[\"det_moda_fn\"])}')
+          print('=' * 50)
+          "
+          else
+            echo "[WARN] eval_results.json not found"
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bev-eval-run${{ github.run_number }}
+          path: |
+            eval_results.json
+            bev_prediction.png
+            bev_overlay.png
+          if-no-files-found: warn
+
+      - name: Stop Colab session
+        if: always()
+        run: colab stop -s bev-eval || true
