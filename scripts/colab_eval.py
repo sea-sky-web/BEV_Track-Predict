@@ -50,14 +50,43 @@ def main():
     else:
         run(f"git clone {REPO_URL} {REPO_DIR}")
 
-    # 2. 下载数据集
+    # 2. 下载数据集（与 colab_train.py 保持一致的下载方式）
     data_root = Path(args.data_root) if args.data_root else REPO_DIR / "wildtrack"
     if not (data_root / "Image_subsets").exists():
-        run("pip install -q gdown")
+        run([sys.executable, "-m", "pip", "install", "-q", "gdown"])
         zip_path = "/tmp/wildtrack.zip"
-        run(f"gdown {GDRIVE_FILE_ID} -O {zip_path}")
+
+        # 尝试下载，最多重试 2 次
+        downloaded = False
+        for attempt in range(3):
+            print(f"\n[INFO] 下载尝试 {attempt + 1}/3 ...", flush=True)
+            ret = run(
+                [sys.executable, "-m", "gdown",
+                 f"https://drive.google.com/uc?id={GDRIVE_FILE_ID}",
+                 "-O", zip_path],
+                check=False,
+            )
+            if ret == 0 and os.path.exists(zip_path) and os.path.getsize(zip_path) > 1_000_000:
+                downloaded = True
+                break
+            print(f"[WARN] 尝试 {attempt + 1} 失败", flush=True)
+            import time; time.sleep(5)
+
+        if not downloaded:
+            # 备选：使用 gdown --fuzzy
+            print("[INFO] 尝试 --fuzzy 模式 ...", flush=True)
+            ret = run(
+                [sys.executable, "-m", "gdown",
+                 f"https://drive.google.com/uc?id={GDRIVE_FILE_ID}",
+                 "-O", zip_path, "--fuzzy"],
+                check=False,
+            )
+            if ret != 0 or not os.path.exists(zip_path) or os.path.getsize(zip_path) < 1_000_000:
+                print("[ERROR] 数据集下载失败，请检查 Google Drive 权限或配额", flush=True)
+                sys.exit(1)
+
         print(f"[OK] 下载完成：{zip_path} ({os.path.getsize(zip_path) / 1e9:.1f} GB)", flush=True)
-        run(f"unzip -q -o {zip_path} -d {REPO_DIR}")
+        run(f"unzip -q -o {zip_path} -d {REPO_DIR}".split())
         os.remove(zip_path)
         print("[OK] 解压完成", flush=True)
 
