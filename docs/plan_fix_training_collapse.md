@@ -93,6 +93,41 @@
 
 ---
 
+## Step 2 验证结果（2026-06-22）
+
+**Commit**: `ec891e7` — "fix(step2): align Gaussian kernel params to MVDet"
+**Actions Run**: https://github.com/sea-sky-web/BEV_Track-Predict/actions/runs/27954744684
+**GPU**: T4, 10 epochs
+
+**修改内容**：`src/config.py` — MAP_KSIZE=11→41, MAP_SIGMA=2.5→5.0, IMG_KSIZE=11→21, IMG_SIGMA=2.0→2.5
+
+### 关键指标对比（vs Step 1）
+
+| 指标 | Step 1 | Step 2 | 判定 |
+|------|--------|--------|------|
+| pos_mse 最佳 | ~0.14 | **~0.094** | ✅ 下降 33% |
+| aux_pos_mse | 0.218-0.225 | **0.210-0.213** | ✅ 改善 |
+| pred_raw max | 0.5-1.1 | **1.5-2.0** | ✅ 激活翻倍 |
+| pred_raw mean | 0.01-0.03 | **0.05-0.13** | ✅ 更自信 |
+| loss epoch 9 | 0.008 | 0.021 | 预期（GT 峰值更高） |
+
+### Epoch 级别 loss 趋势
+
+| Epoch | Loss | BEV | IMG |
+|-------|------|-----|-----|
+| 0 | 0.0566 | 0.0528 | 0.0038 |
+| 1 | 0.0428 | 0.0406 | 0.0022 |
+| 2 | 0.0395 | 0.0374 | 0.0021 |
+| 7 | 0.0239 | 0.0219 | 0.0020 |
+| 8 | 0.0223 | 0.0203 | 0.0019 |
+| 9 | 0.0215 | 0.0195 | 0.0019 |
+
+### 结论
+
+**Step 2 修复成功**。宽高斯核让正样本信号更充分，pos_mse 从 0.14 进一步降到 0.094，pred_raw max 从 1.1 提升到 2.0。Loss 绝对值更高是因为 GT 峰值从 ~0.4 提升到 ~1.0（sigma 从 2.5→5.0）。继续 Step 3。
+
+---
+
 ## 不做的事
 
 - 不改 loss 类型（保持 GaussianMSE）
