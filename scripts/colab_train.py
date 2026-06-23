@@ -119,7 +119,7 @@ train_cmd = [
     sys.executable, "scripts/train_main.py",
     "--data_root",              str(data_root),
     "--views",                  "0,1,2,3,4,5,6",
-    "--max_frames",             "-1",
+    "--max_frames",             "100",
     "--epochs",                 str(args.epochs),
     "--batch",                  "1",
     "--pretrained",             "true",

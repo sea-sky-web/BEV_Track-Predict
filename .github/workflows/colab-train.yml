@@ -67,6 +67,7 @@ jobs:
 
       # 用 gdown 从共享链接下载数据集，不再依赖 drive.mount()
       - name: Run training
+        timeout-minutes: 90
         run: |
           {
             echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}']"

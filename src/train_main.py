@@ -401,13 +401,14 @@ def main():
               f"raw_pos_mse={epoch_stats['raw_pos_mse']:.6f} "
               f"snr={epoch_stats['snr']:.3f}")
         
-        # 保存检查点
+        # 保存检查点（每轮更新 model_final.pth 防止超时中断）
         if (ep + 1) % 5 == 0:
             trainer.save_checkpoint(ep)
+        torch.save(model.state_dict(), out_dir / "model_final.pth")
+        print(f"[CKPT] updated model_final.pth after epoch {ep}")
     
-    # ========== 8. 保存最终模型 ==========
-    print("\n[SAVE] Saving final model...")
-    torch.save(model.state_dict(), out_dir / "model_final.pth")
+    # ========== 8. 最终状态确认 ==========
+    print("\n[SAVE] model_final.pth already saved per-epoch above.")
     print(f"[OK] saved {out_dir / 'model_final.pth'}")
 
 
