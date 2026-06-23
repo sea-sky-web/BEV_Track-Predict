@@ -58,12 +58,17 @@ jobs:
           EOF
 
       - name: Download training artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bev-checkpoint-run${{ inputs.train_run_id }}
-          run-id: ${{ inputs.train_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
+        run: |
+          gh run download ${{ inputs.train_run_id }} --dir ./artifact_dl 2>&1 || true
+          if [ -f ./artifact_dl/*/model_final.pth ]; then
+            cp ./artifact_dl/*/model_final.pth ./model_final.pth
+            echo "[OK] model_final.pth downloaded from run ${{ inputs.train_run_id }}"
+          else
+            echo "[WARN] Could not download model from run ${{ inputs.train_run_id }}"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check model file
         id: check_model
