@@ -76,6 +76,26 @@ jobs:
           colab download -s bev-train "$REMOTE/model_final.pth" ./model_final.pth || true
           colab download -s bev-train "$REMOTE/metrics.csv"    ./metrics.csv      || true
 
+      - name: Run detection evaluation
+        if: success()
+        run: |
+          colab exec -s bev-train --timeout 600 <<'EVAL'
+          import subprocess, sys
+          cmd = (
+              "cd /content/BEV_Track-Predict && "
+              "python3 src/evaluate_main.py "
+              "--data_root /content/BEV_Track-Predict/wildtrack "
+              "--model_path outputs/train_multicam_mvdet_style_v3/model_final.pth "
+              "--device cuda "
+              "--report_detection "
+              "--metrics_out outputs/eval_results.json "
+              "--views 0,1,2,3,4,5,6"
+          )
+          print(f">>> {cmd}", flush=True)
+          ret = subprocess.call(cmd, shell=True)
+          print(f"\n[EVAL] exit code: {ret}", flush=True)
+          EVAL
+
       - name: Generate prediction visualization
         if: success()
         run: |
@@ -93,6 +113,39 @@ jobs:
           subprocess.check_call(cmd, shell=True)
           VIZ
 
+      - name: Download evaluation results
+        if: always()
+        run: |
+          REMOTE="/content/BEV_Track-Predict/outputs"
+          colab download -s bev-train "$REMOTE/eval_results.json" ./eval_results.json || true
+
+      - name: Print evaluation summary
+        if: always()
+        run: |
+          if [ -f eval_results.json ]; then
+            python3 -c "
+          import json
+          r = json.load(open('eval_results.json'))
+          print('=' * 50)
+          print('EVALUATION RESULTS')
+          print('=' * 50)
+          for k in ['loss','pos_mse','aux_pos_mse']:
+              print(f'{k:20s}: {r.get(k, \"N/A\"):.6f}' if isinstance(r.get(k), (int,float)) else f'{k:20s}: N/A')
+          if 'det_moda' in r:
+              print('-' * 50)
+              print(f'{\"MODA\":20s}: {r[\"det_moda\"]:.4f}')
+              print(f'{\"MODP\":20s}: {r[\"det_modp\"]:.4f}')
+              print(f'{\"Precision\":20s}: {r[\"det_precision\"]:.4f}')
+              print(f'{\"Recall\":20s}: {r[\"det_recall\"]:.4f}')
+              print(f'{\"F1\":20s}: {r[\"det_f1\"]:.4f}')
+              print(f'{\"Best Threshold\":20s}: {r[\"det_best_threshold\"]:.2f}')
+              print(f'{\"TP/FP/FN\":20s}: {int(r[\"det_moda_tp\"])}/{int(r[\"det_moda_fp\"])}/{int(r[\"det_moda_fn\"])}')
+          print('=' * 50)
+          "
+          else
+            echo "[WARN] eval_results.json not found — evaluation may have failed"
+          fi
+
       - name: Download visualization
         if: always()
         run: |
@@ -108,6 +161,7 @@ jobs:
           path: |
             model_final.pth
             metrics.csv
+            eval_results.json
             bev_prediction.png
             bev_overlay.png
           if-no-files-found: warn
