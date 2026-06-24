@@ -12,6 +12,7 @@ Colab 训练启动脚本。
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -57,7 +58,7 @@ parser.add_argument("--max_frames", type=int, default=100,
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
-banner("1/5  克隆 / 更新仓库")
+banner("1/6  克隆 / 更新仓库")
 if REPO_DIR.exists():
     run(["git", "-C", str(REPO_DIR), "pull", "--ff-only"], check=False)
 else:
@@ -66,7 +67,7 @@ else:
 os.chdir(str(REPO_DIR))
 
 # ── 2. 下载并解压数据集 ───────────────────────────────────────
-banner("2/5  数据集准备")
+banner("2/6  数据集准备")
 data_root = REPO_DIR / "wildtrack"
 
 if args.data_root:
@@ -114,7 +115,7 @@ else:
     print(f"[OK] 数据就绪：{data_root}")
 
 # ── 3. 验证数据集 ─────────────────────────────────────────────
-banner("3/5  验证数据集结构")
+banner("3/6  验证数据集结构")
 for subdir in ["Image_subsets", "calibrations", "annotations_positions"]:
     p = data_root / subdir
     if p.exists():
@@ -125,12 +126,12 @@ for subdir in ["Image_subsets", "calibrations", "annotations_positions"]:
         sys.exit(1)
 
 # ── 4. 安装依赖 ───────────────────────────────────────────────
-banner("4/5  安装 Python 依赖")
+banner("4/6  安装 Python 依赖")
 run([sys.executable, "-m", "pip", "install", "-q",
      "-r", str(REPO_DIR / "requirements.txt")])
 
 # ── 5. 训练 ──────────────────────────────────────────────────
-banner("5/5  开始训练")
+banner("5/6  开始训练")
 
 train_cmd = [
     sys.executable, "scripts/train_main.py",
@@ -162,4 +163,44 @@ if ret != 0:
     sys.exit(ret)
 
 print(f"\n[OK] 训练完成")
-print(f"模型：{REPO_DIR / 'outputs/train_multicam_mvdet_style_v3/model_final.pth'}")
+
+# ── 6. 评估 + 可视化（同一 colab exec，避免 session 死亡）────────
+banner("6/6  检测评估 + 可视化")
+
+model_path = REPO_DIR / "outputs/train_multicam_mvdet_style_v3/model_final.pth"
+eval_out   = REPO_DIR / "outputs/eval_results.json"
+
+eval_cmd = [
+    sys.executable, "src/evaluate_main.py",
+    "--data_root",       str(data_root),
+    "--model_path",      str(model_path),
+    "--device",          args.device,
+    "--report_detection",
+    "--metrics_out",     str(eval_out),
+    "--views",           "0,1,2,3,4,5,6",
+]
+print("命令：", " ".join(eval_cmd))
+eval_ret = run(eval_cmd, cwd=str(REPO_DIR), check=False)
+print(f"\n[EVAL] exit code: {eval_ret}", flush=True)
+
+# 把结果直接打印到 stdout（GA 日志捕获，不依赖下载）
+if eval_out.exists():
+    r = json.loads(eval_out.read_text())
+    print("\n=== EVAL RESULTS (inline) ===")
+    for k in ["det_moda", "det_modp", "det_precision", "det_recall", "det_f1",
+              "det_best_threshold", "det_moda_tp", "det_moda_fp", "det_moda_fn"]:
+        print(f"{k}: {r.get(k, 'N/A')}")
+    print("=== END EVAL RESULTS ===", flush=True)
+else:
+    print("[WARN] eval_results.json not found", flush=True)
+
+# 可视化
+viz_cmd = [
+    sys.executable, "scripts/visualize_prediction.py",
+    "--model_path",  str(model_path),
+    "--data_root",   str(data_root),
+    "--output",      str(REPO_DIR / "outputs/visualization"),
+    "--frame",       "0",
+]
+run(viz_cmd, cwd=str(REPO_DIR), check=False)
+print("[OK] 全部完成", flush=True)
