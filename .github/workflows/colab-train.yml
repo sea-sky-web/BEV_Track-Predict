@@ -66,6 +66,9 @@ jobs:
           print("[OK] token.json constructed from refresh_token")
           EOF
 
+      - name: Kill stale sessions
+        run: colab stop -s bev-train || true
+
       - name: Create Colab session
         run: colab new --gpu ${{ inputs.gpu }} --session bev-train
 
