@@ -15,6 +15,10 @@ on:
         description: 'BEV 正样本损失权重（抬高行人响应）'
         default: '10.0'
         required: false
+      max_frames:
+        description: '训练帧数上限（更多帧 = 更多数据 = 更好泛化）'
+        default: '100'
+        required: false
 
 jobs:
   train:
@@ -73,7 +77,7 @@ jobs:
         continue-on-error: true
         run: |
           {
-            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}']"
+            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}']"
             cat scripts/colab_train.py
           } | colab exec -s bev-train --timeout 2400
 
@@ -84,14 +88,16 @@ jobs:
           colab download -s bev-train "$REMOTE/model_final.pth" ./model_final.pth || true
           colab download -s bev-train "$REMOTE/metrics.csv"    ./metrics.csv      || true
 
-      - name: Run detection evaluation
+      - name: Run evaluation + visualization (single session)
         if: always()
-        timeout-minutes: 20
+        timeout-minutes: 25
         continue-on-error: true
         run: |
-          colab exec -s bev-train --timeout 1000 <<'EVAL'
-          import subprocess, sys
-          cmd = (
+          colab exec -s bev-train --timeout 1200 <<'EVALVIZ'
+          import subprocess, sys, json, pathlib
+
+          # --- Evaluation ---
+          eval_cmd = (
               "cd /content/BEV_Track-Predict && "
               "python3 src/evaluate_main.py "
               "--data_root /content/BEV_Track-Predict/wildtrack "
@@ -101,19 +107,24 @@ jobs:
               "--metrics_out outputs/eval_results.json "
               "--views 0,1,2,3,4,5,6"
           )
-          print(f">>> {cmd}", flush=True)
-          ret = subprocess.call(cmd, shell=True)
+          print(f">>> {eval_cmd}", flush=True)
+          ret = subprocess.call(eval_cmd, shell=True)
           print(f"\n[EVAL] exit code: {ret}", flush=True)
-          EVAL
 
-      - name: Generate prediction visualization
-        if: always()
-        timeout-minutes: 10
-        continue-on-error: true
-        run: |
-          colab exec -s bev-train --timeout 500 <<'VIZ'
-          import subprocess
-          cmd = (
+          # --- Inline eval results (captured by GA logs even if download fails) ---
+          p = pathlib.Path('/content/BEV_Track-Predict/outputs/eval_results.json')
+          if p.exists():
+              r = json.loads(p.read_text())
+              print('\n=== EVAL RESULTS (inline) ===')
+              for k in ['det_moda','det_modp','det_precision','det_recall','det_f1',
+                        'det_best_threshold','det_moda_tp','det_moda_fp','det_moda_fn']:
+                  print(f'{k}: {r.get(k, "N/A")}')
+              print('=== END EVAL RESULTS ===', flush=True)
+          else:
+              print('[WARN] eval_results.json not found after eval', flush=True)
+
+          # --- Visualization (same session, before it dies) ---
+          viz_cmd = (
               "cd /content/BEV_Track-Predict && "
               "python3 scripts/visualize_prediction.py "
               "--model_path outputs/train_multicam_mvdet_style_v3/model_final.pth "
@@ -121,9 +132,10 @@ jobs:
               "--output outputs/visualization "
               "--frame 0"
           )
-          print(f">>> {cmd}", flush=True)
-          subprocess.check_call(cmd, shell=True)
-          VIZ
+          print(f"\n>>> {viz_cmd}", flush=True)
+          ret2 = subprocess.call(viz_cmd, shell=True)
+          print(f"[VIZ] exit code: {ret2}", flush=True)
+          EVALVIZ
 
       - name: Download evaluation results
         if: always()

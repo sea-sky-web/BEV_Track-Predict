@@ -29,6 +29,12 @@ jobs:
           PYTHONPYCACHEPREFIX=/tmp/bev_pycache python -m py_compile src/config.py src/augmentation.py src/calibration.py src/dataset.py src/evaluate_main.py src/geometry.py src/loss.py src/metrics.py src/models.py src/train_main.py src/trainer.py src/utils.py scripts/train_main.py scripts/run_colab_exp.py scripts/commit_ai_runs.py scripts/verify_modules.py
           PYTHONPYCACHEPREFIX=/tmp/bev_pycache python -m compileall src scripts tests
 
-      - name: Forward and metric smoke tests
+      - name: Unit and integration smoke tests
         run: |
-          PYTHONPATH=src pytest tests/test_geometry.py tests/test_metrics.py tests/test_augmentation.py tests/test_smoke_forward.py -v --tb=short
+          PYTHONPATH=src pytest \
+            tests/test_geometry.py \
+            tests/test_metrics.py \
+            tests/test_augmentation.py \
+            tests/test_smoke_forward.py \
+            tests/test_loss.py \
+            -v --tb=short

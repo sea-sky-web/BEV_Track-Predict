@@ -52,6 +52,8 @@ parser.add_argument("--epochs", type=int, default=10)
 parser.add_argument("--bev_pos_weight", type=float, default=10.0,
                     help="BEV 正样本损失权重")
 parser.add_argument("--device", default="cuda")
+parser.add_argument("--max_frames", type=int, default=100,
+                    help="Max training frames (more data = better generalization)")
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
@@ -119,7 +121,7 @@ train_cmd = [
     sys.executable, "scripts/train_main.py",
     "--data_root",              str(data_root),
     "--views",                  "0,1,2,3,4,5,6",
-    "--max_frames",             "100",
+    "--max_frames",             str(args.max_frames),
     "--epochs",                 str(args.epochs),
     "--batch",                  "1",
     "--pretrained",             "true",
