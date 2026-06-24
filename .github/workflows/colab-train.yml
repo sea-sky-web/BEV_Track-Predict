@@ -69,17 +69,17 @@ jobs:
       - name: Create Colab session
         run: colab new --gpu ${{ inputs.gpu }} --session bev-train
 
-      # colab exec --timeout 2400 fires after 2400s of inactivity/connection loss.
-      # Training completes within that window; the TimeoutError is just cleanup noise.
-      # continue-on-error lets eval/viz steps run regardless.
+      # colab exec --timeout is inactivity timeout. Set high (7200s=2h) so long training
+      # doesn't disconnect. The step-level timeout-minutes=240 is the hard wall.
+      # continue-on-error lets download/eval steps run even if training times out.
       - name: Run training
-        timeout-minutes: 90
+        timeout-minutes: 240
         continue-on-error: true
         run: |
           {
             echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}']"
             cat scripts/colab_train.py
-          } | colab exec -s bev-train --timeout 2400
+          } | colab exec -s bev-train --timeout 7200
 
       - name: Download checkpoint
         if: always()
