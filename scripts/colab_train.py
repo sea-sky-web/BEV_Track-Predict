@@ -91,22 +91,24 @@ else:
         print("[ERROR] gdown --folder 下载失败")
         sys.exit(1)
 
-    # 诊断：打印 REPO_DIR 下所有内容（2 层深）
-    print("[DEBUG] 下载后目录结构：")
-    for p in sorted(REPO_DIR.rglob("*")):
-        depth = len(p.relative_to(REPO_DIR).parts)
-        if depth <= 2:
-            print(f"  {'  ' * (depth-1)}{p.name}{'/' if p.is_dir() else ''}")
+    # Drive 文件夹可能直接包含 wildtrack.zip — 解压
+    zip_path = REPO_DIR / "wildtrack.zip"
+    if zip_path.exists():
+        print(f"[INFO] 发现 wildtrack.zip ({zip_path.stat().st_size / 1e9:.2f} GB)，解压中 ...")
+        run(["unzip", "-q", str(zip_path), "-d", str(REPO_DIR)])
+        zip_path.unlink()
+        print("[OK] 解压完成")
 
     # 递归查找 Image_subsets，确定数据实际落点
     found = list(REPO_DIR.rglob("Image_subsets"))
     if not found:
-        print("[ERROR] 找不到 Image_subsets，Drive 文件夹结构异常")
+        print("[ERROR] 找不到 Image_subsets，下载或解压失败")
         sys.exit(1)
-    actual_root = found[0].parent  # Image_subsets 的父目录就是 wildtrack root
+    actual_root = found[0].parent
     if actual_root != data_root:
+        import shutil
         if data_root.exists():
-            import shutil; shutil.rmtree(str(data_root))
+            shutil.rmtree(str(data_root))
         actual_root.rename(data_root)
         print(f"[OK] 数据移动到：{data_root}")
     print(f"[OK] 数据就绪：{data_root}")
