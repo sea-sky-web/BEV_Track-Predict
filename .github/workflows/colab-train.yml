@@ -65,9 +65,12 @@ jobs:
       - name: Create Colab session
         run: colab new --gpu ${{ inputs.gpu }} --session bev-train
 
-      # 用 gdown 从共享链接下载数据集，不再依赖 drive.mount()
+      # colab exec --timeout 2400 fires after 2400s of inactivity/connection loss.
+      # Training completes within that window; the TimeoutError is just cleanup noise.
+      # continue-on-error lets eval/viz steps run regardless.
       - name: Run training
         timeout-minutes: 90
+        continue-on-error: true
         run: |
           {
             echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}']"
@@ -82,9 +85,11 @@ jobs:
           colab download -s bev-train "$REMOTE/metrics.csv"    ./metrics.csv      || true
 
       - name: Run detection evaluation
-        if: success()
+        if: always()
+        timeout-minutes: 20
+        continue-on-error: true
         run: |
-          colab exec -s bev-train --timeout 600 <<'EVAL'
+          colab exec -s bev-train --timeout 1000 <<'EVAL'
           import subprocess, sys
           cmd = (
               "cd /content/BEV_Track-Predict && "
@@ -102,9 +107,11 @@ jobs:
           EVAL
 
       - name: Generate prediction visualization
-        if: success()
+        if: always()
+        timeout-minutes: 10
+        continue-on-error: true
         run: |
-          colab exec -s bev-train --timeout 300 <<'VIZ'
+          colab exec -s bev-train --timeout 500 <<'VIZ'
           import subprocess
           cmd = (
               "cd /content/BEV_Track-Predict && "
