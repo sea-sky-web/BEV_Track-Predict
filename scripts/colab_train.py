@@ -83,21 +83,19 @@ else:
     print(f"[INFO] 从 Google Drive 文件夹下载 wildtrack (ID: {args.gdrive_id}) ...")
     run([sys.executable, "-m", "pip", "install", "-q", "gdown"])
     ret = run([
-        sys.executable, "-m", "gdown", "--folder",
+        sys.executable, "-m", "gdown", "--folder", "--fuzzy",
         f"https://drive.google.com/drive/folders/{args.gdrive_id}",
-        "-O", str(REPO_DIR / "wildtrack"),
-        "--remaining-ok",
+        "-O", str(REPO_DIR),
     ], check=False)
     if ret != 0:
         print("[ERROR] gdown --folder 下载失败")
         sys.exit(1)
 
-    # gdown --folder 可能在 wildtrack/ 下再建一层同名子目录，自动展平
-    nested = data_root / data_root.name
-    if not (data_root / "Image_subsets").exists() and nested.is_dir():
-        for item in nested.iterdir():
-            item.rename(data_root / item.name)
-        nested.rmdir()
+    # gdown --folder 默认以 Drive 文件夹名创建子目录，对齐到 data_root
+    for candidate in [REPO_DIR / "wildtrack", REPO_DIR / "Wildtrack", REPO_DIR / "WILDTRACK"]:
+        if candidate.is_dir() and candidate != data_root:
+            candidate.rename(data_root)
+            break
 
     print(f"[OK] 数据下载完成：{data_root}")
 
