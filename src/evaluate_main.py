@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--det_thresholds",
         type=str,
-        default="0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,0.60",
+        default="-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50",
         help="Comma-separated detection thresholds (raw logit space, MVDet default=0.4)",
     )
     ap.add_argument("--det_dist_thr", type=float, default=3.0, help="Match distance threshold (BEV cells)")
