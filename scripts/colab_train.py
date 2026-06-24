@@ -19,7 +19,7 @@ from pathlib import Path
 
 REPO_URL = "https://github.com/sea-sky-web/BEV_Track-Predict.git"
 REPO_DIR = Path("/content/BEV_Track-Predict")
-GDRIVE_FILE_ID = "1LDNFgAEq9wYWkbOPk4UdXQetBkhZSVfy"
+GDRIVE_FOLDER_ID = "1hkDMbbXRNBvWEuFq-g4sPrGKuu36grBP"
 
 
 def run(cmd, cwd=None, check=True):
@@ -44,8 +44,8 @@ def banner(msg: str):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--gdrive_id", default=GDRIVE_FILE_ID,
-                    help="wildtrack.zip 的 Google Drive 文件 ID")
+parser.add_argument("--gdrive_id", default=GDRIVE_FOLDER_ID,
+                    help="wildtrack 数据集的 Google Drive 文件夹 ID")
 parser.add_argument("--data_root", default=None,
                     help="已解压的数据集路径（跳过下载）")
 parser.add_argument("--epochs", type=int, default=10)
@@ -80,23 +80,26 @@ elif data_root.is_dir() and (data_root / "Image_subsets").exists():
 else:
     run(["rm", "-rf", str(REPO_DIR / "wildtrack"), str(REPO_DIR / "wiltrack")], check=False)
 
-    zip_path = REPO_DIR / "wildtrack.zip"
-    print(f"[INFO] 从 Google Drive 下载 wildtrack.zip (ID: {args.gdrive_id}) ...")
+    print(f"[INFO] 从 Google Drive 文件夹下载 wildtrack (ID: {args.gdrive_id}) ...")
     run([sys.executable, "-m", "pip", "install", "-q", "gdown"])
     ret = run([
-        sys.executable, "-m", "gdown",
-        f"https://drive.google.com/uc?id={args.gdrive_id}",
-        "-O", str(zip_path),
+        sys.executable, "-m", "gdown", "--folder",
+        f"https://drive.google.com/drive/folders/{args.gdrive_id}",
+        "-O", str(REPO_DIR / "wildtrack"),
+        "--remaining-ok",
     ], check=False)
-    if ret != 0 or not zip_path.exists():
-        print("[ERROR] gdown 下载失败")
+    if ret != 0:
+        print("[ERROR] gdown --folder 下载失败")
         sys.exit(1)
-    print(f"[OK] 下载完成：{zip_path} ({zip_path.stat().st_size / 1e9:.1f} GB)")
 
-    print("[INFO] 解压中 ...")
-    run(["unzip", "-q", str(zip_path), "-d", str(REPO_DIR)])
-    zip_path.unlink()
-    print("[OK] 解压完成，已删除 zip")
+    # gdown --folder 可能在 wildtrack/ 下再建一层同名子目录，自动展平
+    nested = data_root / data_root.name
+    if not (data_root / "Image_subsets").exists() and nested.is_dir():
+        for item in nested.iterdir():
+            item.rename(data_root / item.name)
+        nested.rmdir()
+
+    print(f"[OK] 数据下载完成：{data_root}")
 
 # ── 3. 验证数据集 ─────────────────────────────────────────────
 banner("3/5  验证数据集结构")
