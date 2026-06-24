@@ -108,19 +108,19 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--det_thresholds",
         type=str,
-        default="0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50",
-        help="Comma-separated detection thresholds",
+        default="0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,0.60",
+        help="Comma-separated detection thresholds (raw logit space, MVDet default=0.4)",
     )
     ap.add_argument("--det_dist_thr", type=float, default=3.0, help="Match distance threshold (BEV cells)")
     ap.add_argument("--det_moda_dist_m", type=float, default=DEFAULT_MODA_DIST_M, help="MODA/MODP match threshold in meters")
-    ap.add_argument("--det_nms_ksize", type=int, default=3, help="NMS kernel size (odd int)")
+    ap.add_argument("--det_nms_ksize", type=int, default=3, help="NMS kernel size (odd int, used only for GT extraction)")
     ap.add_argument(
         "--det_min_distance",
         type=float,
-        default=0.0,
-        help="Optional greedy suppression distance between predicted BEV peaks. 0 disables it.",
+        default=5.0,
+        help="Greedy NMS suppression radius in BEV cells (MVDet: 5 reduced cells = 0.5m).",
     )
-    ap.add_argument("--det_max_preds", type=int, default=200, help="Max predictions per frame after NMS")
+    ap.add_argument("--det_max_preds", type=int, default=50, help="Max predictions per frame (MVDet: top_k=50)")
 
     ap.add_argument(
         "--metrics_out",
@@ -150,8 +150,8 @@ def parse_thresholds(raw: str) -> List[float]:
         raise ValueError("det_thresholds cannot be empty.")
     vals = sorted(set(vals))
     for v in vals:
-        if v < 0.0 or v > 1.0:
-            raise ValueError(f"det_threshold out of range [0,1]: {v}")
+        if v < 0.0:
+            raise ValueError(f"det_threshold must be >= 0: {v}")
     return vals
 
 
@@ -246,34 +246,34 @@ def evaluate_model(
             imgs_gt = imgs_gt.to(device, non_blocking=True)
 
             map_logits, imgs_logits = model(x_views)
-            map_res = torch.sigmoid(map_logits)
-            imgs_res = torch.sigmoid(imgs_logits)
 
-            bev_loss = criterion(map_res, map_gt, map_kernel)
+            # Loss: use raw logits (matches training, matches MVDet)
+            bev_loss = criterion(map_logits, map_gt, map_kernel)
             per_view_loss = 0.0
-            for vi in range(imgs_res.shape[1]):
-                per_view_loss = per_view_loss + criterion(imgs_res[:, vi], imgs_gt[:, vi], img_kernel)
-            per_view_loss = per_view_loss / float(imgs_res.shape[1])
+            for vi in range(imgs_logits.shape[1]):
+                per_view_loss = per_view_loss + criterion(imgs_logits[:, vi], imgs_gt[:, vi], img_kernel)
+            per_view_loss = per_view_loss / float(imgs_logits.shape[1])
             loss = bev_loss + alpha * per_view_loss
 
             losses.append(loss.item())
             bev_losses.append(bev_loss.item())
             img_losses.append(per_view_loss.item())
 
-            pooled_gt = F.adaptive_max_pool2d(map_gt, output_size=map_res.shape[-2:])
+            pooled_gt = F.adaptive_max_pool2d(map_gt, output_size=map_logits.shape[-2:])
             pos_mask = pooled_gt > 0.1
-            pos_mse = ((map_res - pooled_gt) ** 2)[pos_mask].mean().item() if pos_mask.any() else float("nan")
+            pos_mse = ((map_logits - pooled_gt) ** 2)[pos_mask].mean().item() if pos_mask.any() else float("nan")
             pos_mses.append(pos_mse)
 
             aux_pos_mask = imgs_gt > 0.1
-            aux_pos_mse = ((imgs_res - imgs_gt) ** 2)[aux_pos_mask].mean().item() if aux_pos_mask.any() else float(
+            aux_pos_mse = ((imgs_logits - imgs_gt) ** 2)[aux_pos_mask].mean().item() if aux_pos_mask.any() else float(
                 "nan"
             )
             aux_pos_mses.append(aux_pos_mse)
 
+            # Detection: use raw logits, not sigmoid (MVDet convention)
             if collect_detection_inputs:
-                for bi in range(map_res.shape[0]):
-                    pred_maps.append(map_res[bi, 0].detach().cpu())
+                for bi in range(map_logits.shape[0]):
+                    pred_maps.append(map_logits[bi, 0].detach().cpu())
                     gt_maps.append(pooled_gt[bi, 0].detach().cpu())
 
             if batch_idx % log_every == 0:
@@ -301,24 +301,17 @@ def _extract_points(
     threshold: float,
     nms_ksize: int,
     max_preds: int,
-    min_distance: float = 0.0,
+    min_distance: float = 5.0,
 ) -> np.ndarray:
+    """Extract detection points from a BEV heatmap using MVDet-style greedy distance NMS.
+
+    MVDet reference: github.com/hou-yz/MVDet/blob/master/multiview_detector/utils/nms.py
+    """
     if heatmap.ndim != 2:
         raise ValueError(f"Expected 2D heatmap, got shape {tuple(heatmap.shape)}")
-    if nms_ksize <= 0 or nms_ksize % 2 == 0:
-        raise ValueError(f"det_nms_ksize must be a positive odd integer, got {nms_ksize}")
-    if min_distance < 0.0:
-        raise ValueError(f"det_min_distance must be >= 0, got {min_distance}")
 
     hm = heatmap.float()
-    pooled = F.max_pool2d(
-        hm.unsqueeze(0).unsqueeze(0),
-        kernel_size=nms_ksize,
-        stride=1,
-        padding=nms_ksize // 2,
-    )[0, 0]
-    keep = (hm >= threshold) & (hm >= pooled - 1e-12)
-    ys, xs = torch.nonzero(keep, as_tuple=True)
+    ys, xs = torch.nonzero(hm >= threshold, as_tuple=True)
     if ys.numel() == 0:
         return np.empty((0, 3), dtype=np.float32)
 
@@ -328,13 +321,19 @@ def _extract_points(
     xs = xs[order].float()
     scores = scores[order].float()
 
+    if max_preds > 0:
+        ys = ys[:max_preds]
+        xs = xs[:max_preds]
+        scores = scores[:max_preds]
+
+    # Greedy distance-based NMS (MVDet style)
     if min_distance > 0.0 and ys.numel() > 1:
         keep_mask = torch.ones(ys.numel(), dtype=torch.bool, device=ys.device)
         for i in range(ys.numel()):
             if not keep_mask[i]:
                 continue
-            dy = ys[i + 1 :] - ys[i]
-            dx = xs[i + 1 :] - xs[i]
+            dy = ys[i + 1:] - ys[i]
+            dx = xs[i + 1:] - xs[i]
             too_close = (dy * dy + dx * dx) < (min_distance * min_distance)
             if too_close.any():
                 suppress_idx = torch.nonzero(too_close, as_tuple=False).view(-1) + i + 1
@@ -342,11 +341,6 @@ def _extract_points(
         ys = ys[keep_mask]
         xs = xs[keep_mask]
         scores = scores[keep_mask]
-
-    if max_preds > 0:
-        ys = ys[:max_preds]
-        xs = xs[:max_preds]
-        scores = scores[:max_preds]
 
     ys = ys.cpu().numpy()
     xs = xs.cpu().numpy()
