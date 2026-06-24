@@ -66,11 +66,19 @@ jobs:
           print("[OK] token.json constructed from refresh_token")
           EOF
 
-      - name: Kill stale sessions
-        run: colab stop -s bev-train || true
-
-      - name: Create Colab session
-        run: colab new --gpu ${{ inputs.gpu }} --session bev-train
+      - name: Kill stale sessions and create session
+        run: |
+          # Kill any existing session (may fail silently if none exists)
+          colab stop -s bev-train 2>/dev/null || true
+          sleep 15
+          # Retry colab new up to 3 times with kill between attempts
+          for attempt in 1 2 3; do
+            echo "=== Create session attempt $attempt ==="
+            colab new --gpu ${{ inputs.gpu }} --session bev-train && break
+            echo "Attempt $attempt failed, killing stale and retrying in 30s..."
+            colab stop -s bev-train 2>/dev/null || true
+            sleep 30
+          done
 
       # colab exec --timeout is inactivity timeout. Set high (7200s=2h) so long training
       # doesn't disconnect. The step-level timeout-minutes=240 is the hard wall.
