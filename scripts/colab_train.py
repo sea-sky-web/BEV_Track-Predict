@@ -81,9 +81,9 @@ else:
     run(["rm", "-rf", str(REPO_DIR / "wildtrack"), str(REPO_DIR / "wiltrack")], check=False)
 
     print(f"[INFO] 从 Google Drive 文件夹下载 wildtrack (ID: {args.gdrive_id}) ...")
-    run([sys.executable, "-m", "pip", "install", "-q", "gdown"])
+    run([sys.executable, "-m", "pip", "install", "-q", "gdown==5.2.0"])
     ret = run([
-        sys.executable, "-m", "gdown", "--folder", "--fuzzy",
+        sys.executable, "-m", "gdown", "--folder", "--fuzzy", "--remaining-ok",
         f"https://drive.google.com/drive/folders/{args.gdrive_id}",
         "-O", str(REPO_DIR),
     ], check=False)
@@ -91,13 +91,25 @@ else:
         print("[ERROR] gdown --folder 下载失败")
         sys.exit(1)
 
-    # gdown --folder 默认以 Drive 文件夹名创建子目录，对齐到 data_root
-    for candidate in [REPO_DIR / "wildtrack", REPO_DIR / "Wildtrack", REPO_DIR / "WILDTRACK"]:
-        if candidate.is_dir() and candidate != data_root:
-            candidate.rename(data_root)
-            break
+    # 诊断：打印 REPO_DIR 下所有内容（2 层深）
+    print("[DEBUG] 下载后目录结构：")
+    for p in sorted(REPO_DIR.rglob("*")):
+        depth = len(p.relative_to(REPO_DIR).parts)
+        if depth <= 2:
+            print(f"  {'  ' * (depth-1)}{p.name}{'/' if p.is_dir() else ''}")
 
-    print(f"[OK] 数据下载完成：{data_root}")
+    # 递归查找 Image_subsets，确定数据实际落点
+    found = list(REPO_DIR.rglob("Image_subsets"))
+    if not found:
+        print("[ERROR] 找不到 Image_subsets，Drive 文件夹结构异常")
+        sys.exit(1)
+    actual_root = found[0].parent  # Image_subsets 的父目录就是 wildtrack root
+    if actual_root != data_root:
+        if data_root.exists():
+            import shutil; shutil.rmtree(str(data_root))
+        actual_root.rename(data_root)
+        print(f"[OK] 数据移动到：{data_root}")
+    print(f"[OK] 数据就绪：{data_root}")
 
 # ── 3. 验证数据集 ─────────────────────────────────────────────
 banner("3/5  验证数据集结构")
