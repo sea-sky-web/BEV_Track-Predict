@@ -71,13 +71,13 @@ DEFAULT_MAP_SIGMA = 5.0                # BEV 热图高斯标准差（MVDet: 5.0�
 DEFAULT_IMG_KSIZE = 21                 # 图像热图高斯核大小（MVDet: 21）
 DEFAULT_IMG_SIGMA = 2.5                # 图像热图高斯标准差（MVDet: 2.5）
 
-# 优化器
-DEFAULT_OPTIMIZER = "adam"
-DEFAULT_SCHEDULER = "cosine"
-DEFAULT_MAX_LR = 0.01
-DEFAULT_LR_INIT = 1e-4
-DEFAULT_MOMENTUM = 0.9
-DEFAULT_WEIGHT_DECAY = 1e-4
+# 优化器（MVDet 默认：SGD lr=0.1 + OneCycleLR）
+DEFAULT_OPTIMIZER = "sgd"
+DEFAULT_SCHEDULER = "onecycle"
+DEFAULT_MAX_LR = 0.1
+DEFAULT_LR_INIT = 0.1
+DEFAULT_MOMENTUM = 0.5
+DEFAULT_WEIGHT_DECAY = 5e-4
 
 # 训练策略
 DEFAULT_EPOCHS = 10

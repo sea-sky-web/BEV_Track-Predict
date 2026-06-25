@@ -117,10 +117,10 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--det_min_distance",
         type=float,
-        default=5.0,
-        help="Greedy NMS suppression radius in BEV cells (MVDet: 5 reduced cells = 0.5m).",
+        default=20.0,
+        help="Greedy NMS suppression radius in BEV cells (MVDet: 50/2.5=20 cells = 2.0m).",
     )
-    ap.add_argument("--det_max_preds", type=int, default=50, help="Max predictions per frame (MVDet: top_k=50)")
+    ap.add_argument("--det_max_preds", type=int, default=0, help="Max predictions per frame (0=unlimited, MVDet uses top_k sort then NMS)")
 
     ap.add_argument(
         "--metrics_out",

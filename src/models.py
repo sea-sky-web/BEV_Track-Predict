@@ -24,16 +24,16 @@ def normalize_fusion_mode(fusion_mode: str) -> str:
 
 
 def _dilate_basic_resnet_layer(layer: nn.Sequential, dilation: int) -> None:
-    """Convert a torchvision ResNet-18 layer to stride-1 dilated blocks."""
+    """Convert a torchvision ResNet-18 layer to stride-1 dilated blocks.
+
+    Only conv1 gets dilation (matching MVDet's BasicBlock implementation).
+    """
     for block in layer:
         if hasattr(block, "conv1"):
             if block.conv1.stride != (1, 1):
                 block.conv1.stride = (1, 1)
             block.conv1.dilation = (dilation, dilation)
             block.conv1.padding = (dilation, dilation)
-        if hasattr(block, "conv2"):
-            block.conv2.dilation = (dilation, dilation)
-            block.conv2.padding = (dilation, dilation)
         if getattr(block, "downsample", None) is not None:
             conv = block.downsample[0]
             if hasattr(conv, "stride") and conv.stride != (1, 1):
@@ -184,6 +184,26 @@ class ImgHeadFoot(nn.Module):
                          - [:, 0]: 人头热图
                          - [:, 1]: 人脚热图
         """
+        return self.net(x)
+
+
+class MVDetMapClassifier(nn.Module):
+    """MVDet 原始论文的 BEV head：3 层 dilated conv，无 BatchNorm，输出层无 bias。
+
+    Reference: github.com/hou-yz/MVDet/blob/master/multiview_detector/models/persp_trans_detector.py
+    """
+
+    def __init__(self, in_ch: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_ch, 512, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, 3, padding=2, dilation=2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 1, 3, padding=4, dilation=4, bias=False),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
 
@@ -391,7 +411,10 @@ class MVDetLikeNet(nn.Module):
             self.coord = None
         
         # BEV 融合预测头
-        self.bev_head = BEVHeadDilated(in_ch=in_bev, mid_ch=256)
+        if fusion_mode == "concat":
+            self.bev_head = MVDetMapClassifier(in_ch=in_bev)
+        else:
+            self.bev_head = BEVHeadDilated(in_ch=in_bev, mid_ch=256)
     
     def forward(self, x_views: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """

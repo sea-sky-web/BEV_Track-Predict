@@ -482,7 +482,9 @@ def create_optimizer(
         backbone_params = [p for p in backbone.parameters() if p.requires_grad]
         backbone_ids = {id(p) for p in backbone.parameters()}
         if backbone_params:
-            param_groups.append({"name": "backbone", "params": backbone_params, "lr": lr * 0.1})
+            # MVDet uses same lr for all params; only reduce backbone lr for Adam
+            bb_lr = lr * 0.1 if optimizer_name == "adam" else lr
+            param_groups.append({"name": "backbone", "params": backbone_params, "lr": bb_lr})
 
     head_params = [p for p in model.parameters() if id(p) not in backbone_ids and p.requires_grad]
     if head_params:
@@ -530,10 +532,14 @@ def create_scheduler(
             T_max=total_steps,
         )
     if scheduler_name == "onecycle":
-        max_lrs = [
-            max_lr * 0.1 if group.get("name") == "backbone" else max_lr
-            for group in optimizer.param_groups
-        ]
+        max_lrs = []
+        for group in optimizer.param_groups:
+            if group.get("name") == "backbone":
+                # SGD: same lr for all (MVDet style); Adam: reduce backbone lr
+                is_sgd = isinstance(optimizer, torch.optim.SGD)
+                max_lrs.append(max_lr if is_sgd else max_lr * 0.1)
+            else:
+                max_lrs.append(max_lr)
         return torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
             max_lr=max_lrs,
