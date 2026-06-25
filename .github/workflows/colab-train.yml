@@ -20,7 +20,7 @@ on:
         default: '100'
         required: false
       checkpoint_run:
-        description: 'eval-only: 从指定 run number 下载 checkpoint（配合 epochs=0）'
+        description: 'eval-only: 从指定 GA run ID 下载 checkpoint（配合 epochs=0）'
         default: ''
         required: false
 
@@ -88,7 +88,7 @@ jobs:
         if: inputs.checkpoint_run != '' && inputs.epochs == '0'
         run: |
           echo "Downloading checkpoint from run ${{ inputs.checkpoint_run }}..."
-          gh run download ${{ inputs.checkpoint_run }} -n bev-checkpoint-run${{ inputs.checkpoint_run }} -D /tmp/ckpt 2>&1 || true
+          gh run download ${{ inputs.checkpoint_run }} -D /tmp/ckpt 2>&1 || true
           CKPT=$(find /tmp/ckpt -name 'model_final.pth' | head -1)
           if [ -z "$CKPT" ]; then
             echo "[ERROR] model_final.pth not found in run ${{ inputs.checkpoint_run }} artifacts"
