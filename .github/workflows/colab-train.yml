@@ -96,7 +96,7 @@ jobs:
           fi
           echo "Found checkpoint: $CKPT ($(du -h "$CKPT" | cut -f1))"
           REMOTE="/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3"
-          colab exec -s bev-train "import os; os.makedirs('$REMOTE', exist_ok=True)"
+          echo "import os; os.makedirs('$REMOTE', exist_ok=True)" | colab exec -s bev-train
           colab upload -s bev-train "$CKPT" "$REMOTE/model_final.pth"
           echo "[OK] Checkpoint uploaded to Colab"
         env:
