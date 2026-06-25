@@ -23,17 +23,18 @@ WildTrack synchronized multi-view images
 - 帧数：`max_frames=-1`，使用全部帧
 - backbone：`resnet18`
 - pretrained：`true`，使用 ImageNet 预训练权重
-- fusion：`confidence_v2`
+- fusion：`concat`（MVDet 原始方式，7 视角特征拼接）
+- BEV head：`MVDetMapClassifier`（3 层 dilated conv，无 BN，bias=False）
 - batch：`1`
-- optimizer：Adam
-- scheduler：CosineAnnealingLR
-- `lr_init=1e-4`
-- `weight_decay=1e-4`
-- `freeze_backbone_epochs=3`
+- optimizer：SGD（lr=0.1, momentum=0.5, weight_decay=5e-4）
+- scheduler：OneCycleLR（max_lr=0.1）
+- epochs：10
+- `freeze_backbone_epochs=0`
 - augmentation：默认启用颜色抖动；水平翻转默认 `0.0`
 - evaluation：阈值扫描 + Precision / Recall / F1 / MODA / MODP / localization error
+- NMS：贪心距离抑制，半径 20 cells（2.0m）
 
-`resnet50`、`concat`、`confidence_v1`、SGD 和 OneCycle 仍保留为显式 legacy/ablation 选项。
+`confidence_v2`、`confidence_v1`、Adam、CosineAnnealingLR 和 ResNet-50 仍保留为显式 legacy/ablation 选项。
 
 ## 安装
 
