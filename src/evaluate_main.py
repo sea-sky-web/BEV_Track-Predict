@@ -149,9 +149,6 @@ def parse_thresholds(raw: str) -> List[float]:
     if not vals:
         raise ValueError("det_thresholds cannot be empty.")
     vals = sorted(set(vals))
-    for v in vals:
-        if v < 0.0:
-            raise ValueError(f"det_threshold must be >= 0: {v}")
     return vals
 
 
