@@ -138,7 +138,9 @@ jobs:
               "--device cuda "
               "--report_detection "
               "--metrics_out outputs/eval_results.json "
-              "--views 0,1,2,3,4,5,6"
+              "--views 0,1,2,3,4,5,6 "
+              "--fusion_mode concat "
+              "--backbone resnet18"
           )
           print(f">>> {eval_cmd}", flush=True)
           ret = subprocess.call(eval_cmd, shell=True)

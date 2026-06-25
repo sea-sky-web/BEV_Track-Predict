@@ -169,7 +169,7 @@ if args.epochs > 0:
     "--alpha",                  "1.0",
     "--optimizer",              "sgd",
     "--scheduler",              "onecycle",
-    "--lr_init",                "0.1",
+    "--lr_init",                "0.01",
     "--weight_decay",           "0.0005",
     "--freeze_backbone_epochs", "0",
     "--bev_pos_weight",         str(args.bev_pos_weight),
@@ -201,6 +201,8 @@ eval_cmd = [
     "--report_detection",
     "--metrics_out",     str(eval_out),
     "--views",           "0,1,2,3,4,5,6",
+    "--fusion_mode",     "concat",
+    "--backbone",        "resnet18",
     "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50",
 ]
 print("命令：", " ".join(eval_cmd))

@@ -57,7 +57,7 @@ DEFAULT_FEAT_W = 480                   # 特征图宽度
 DEFAULT_IMG_H = 720                    # 输入图像高度
 DEFAULT_IMG_W = 1280                   # 输入图像宽度
 DEFAULT_FEAT_CH = 512                  # 特征通道数
-DEFAULT_FUSION_MODE = "confidence_v2"  # concat, confidence_v1, confidence_v2
+DEFAULT_FUSION_MODE = "concat"  # concat (MVDet default), confidence_v1, confidence_v2
 
 # 人体模型
 DEFAULT_PERSON_H = 1.7                 # 人体高度（米）
@@ -74,8 +74,8 @@ DEFAULT_IMG_SIGMA = 2.5                # 图像热图高斯标准差（MVDet: 2.
 # 优化器（MVDet 默认：SGD lr=0.1 + OneCycleLR）
 DEFAULT_OPTIMIZER = "sgd"
 DEFAULT_SCHEDULER = "onecycle"
-DEFAULT_MAX_LR = 0.1
-DEFAULT_LR_INIT = 0.1
+DEFAULT_MAX_LR = 0.01
+DEFAULT_LR_INIT = 0.01
 DEFAULT_MOMENTUM = 0.5
 DEFAULT_WEIGHT_DECAY = 5e-4
 

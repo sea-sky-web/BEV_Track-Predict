@@ -1,66 +1,124 @@
 """
-在训练完成后生成 BEV 预测可视化图。
+BEV 预测可视化：生成 GT vs Prediction 对比图。
 用法: python scripts/visualize_prediction.py --model_path <path> --data_root <path> --output <path>
 """
 import argparse
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sys
 
-import torch
-import numpy as np
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+
 import cv2
-from src.config import *
-from src.model import MultiviewDetector
-from src.dataset import WildtrackDataset
-from src.loss import GaussianMSE
-from src.utils import gaussian_kernel
+import numpy as np
+import torch
+import torch.nn.functional as F
+
+from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_pom, scale_intrinsics
+from config import (
+    CAM_NAMES,
+    DEFAULT_BACKBONE,
+    DEFAULT_BEV_DOWN,
+    DEFAULT_FEAT_CH,
+    DEFAULT_FEAT_H,
+    DEFAULT_FEAT_W,
+    DEFAULT_FUSION_MODE,
+    DEFAULT_IMG_H,
+    DEFAULT_IMG_W,
+    DEFAULT_PERSON_H,
+    IMG_ORI_H,
+    IMG_ORI_W,
+)
+from dataset import create_wildtrack_dataset
+from geometry import build_mvdet_proj_mat, compute_valid_ratio_from_homography, make_worldgrid2worldcoord_mat
+from models import create_model
 
 
-def visualize(model_path, data_root, output_dir, device='cuda', frame_idx=0):
+def visualize(model_path, data_root, output_dir, device="cuda", frame_idx=0,
+              fusion_mode=DEFAULT_FUSION_MODE, backbone=DEFAULT_BACKBONE):
     os.makedirs(output_dir, exist_ok=True)
+    from pathlib import Path
 
-    dataset = WildtrackDataset(
-        root=data_root,
-        views=[0, 1, 2, 3, 4, 5, 6],
-        img_h=DEFAULT_IMG_H, img_w=DEFAULT_IMG_W,
-        feat_h=DEFAULT_FEAT_H, feat_w=DEFAULT_FEAT_W,
-        max_frames=-1
+    data_root = Path(data_root)
+    views = list(range(7))
+    feat_hw = (DEFAULT_FEAT_H, DEFAULT_FEAT_W)
+    bev_down = DEFAULT_BEV_DOWN
+
+    pom = parse_rectangles_pom(data_root / "rectangles.pom")
+    calib_loader = CalibrationLoader(data_root / "calibrations", CAM_NAMES)
+    calib_cache, t_norms = calib_loader.load_all(views)
+
+    step_m = float(pom.get("STEP", 0.025))
+    unit_scale = decide_unit_scale(step_m, t_norms)
+
+    hb = int(pom.get("NB_HEIGHT", 1440)) // bev_down
+    wb = int(pom.get("NB_WIDTH", 480)) // bev_down
+    hf, wf = feat_hw
+
+    sx_f = wf / IMG_ORI_W
+    sy_f = hf / IMG_ORI_H
+    for v in views:
+        calib_cache[v]["K_feat"] = scale_intrinsics(calib_cache[v]["K0"], sx=sx_f, sy=sy_f)
+
+    origin_x_m = float(pom.get("ORIGINE_X", -3.0))
+    origin_y_m = float(pom.get("ORIGINE_Y", -9.0))
+    step = (step_m * bev_down) * unit_scale
+    ox = origin_x_m * unit_scale
+    oy = origin_y_m * unit_scale
+    w2w_mat = make_worldgrid2worldcoord_mat(ox, oy, step)
+
+    proj_mats = []
+    for v in views:
+        proj = build_mvdet_proj_mat(calib_cache[v]["K_feat"], calib_cache[v]["R"], calib_cache[v]["t"], w2w_mat)
+        proj_mats.append(torch.from_numpy(proj).float())
+    proj_mats = torch.stack(proj_mats, dim=0)
+
+    ds = create_wildtrack_dataset(
+        data_root=data_root,
+        views=views,
+        max_frames=-1,
+        frame_start=0,
+        img_hw=(DEFAULT_IMG_H, DEFAULT_IMG_W),
+        feat_hw=feat_hw,
+        bev_down=bev_down,
+        person_h_m=DEFAULT_PERSON_H,
+        unit_scale=unit_scale,
+        calib_cache=calib_cache,
     )
 
-    model = MultiviewDetector(
-        backbone=DEFAULT_BACKBONE,
+    dev = torch.device(device)
+    model = create_model(
+        num_views=len(views),
+        proj_mats=proj_mats.to(dev),
+        reduced_hw=(hb, wb),
+        feat_hw=feat_hw,
+        device=dev,
         pretrained=False,
+        backbone=backbone,
         feat_ch=DEFAULT_FEAT_CH,
-        bev_w=NB_WIDTH // DEFAULT_BEV_DOWN,
-        bev_h=NB_HEIGHT // DEFAULT_BEV_DOWN,
-        fusion_mode=DEFAULT_FUSION_MODE,
+        add_coord=True,
+        fusion_mode=fusion_mode,
     )
-    ckpt = torch.load(model_path, map_location=device, weights_only=False)
-    if 'model_state_dict' in ckpt:
-        model.load_state_dict(ckpt['model_state_dict'])
-    else:
-        model.load_state_dict(ckpt)
-    model = model.to(device).eval()
 
-    sample = dataset[frame_idx]
-    imgs = sample['images'].unsqueeze(0).to(device)
-    map_gt = sample['map_gt']
-    projs = sample['proj_mats'].unsqueeze(0).to(device)
+    payload = torch.load(model_path, map_location=dev, weights_only=False)
+    if isinstance(payload, dict) and "model_state_dict" in payload:
+        state_dict = payload["model_state_dict"]
+    else:
+        state_dict = payload
+    model.load_state_dict(state_dict, strict=True)
+    model.eval()
+    print(f"[OK] Loaded model from {model_path} (fusion={fusion_mode}, backbone={backbone})")
+
+    stem, x_views, map_gt, imgs_gt = ds[frame_idx]
+    x_views = x_views.unsqueeze(0).to(dev)
 
     with torch.no_grad():
-        output = model(imgs, projs)
-        if isinstance(output, dict):
-            map_logits = output['map_logits']
-        elif isinstance(output, (tuple, list)):
-            map_logits = output[0]
-        else:
-            map_logits = output
+        map_logits, _ = model(x_views)
 
-    pred = torch.sigmoid(map_logits).squeeze().cpu().numpy()
-    gt = map_gt.squeeze().cpu().numpy()
+    pred = map_logits[0, 0].cpu().numpy()
+    gt = F.adaptive_max_pool2d(map_gt.unsqueeze(0), output_size=map_logits.shape[-2:])[0, 0].numpy()
 
-    pred_vis = (pred * 255).clip(0, 255).astype(np.uint8)
+    pred_sigmoid = 1.0 / (1.0 + np.exp(-np.clip(pred, -20, 20)))
+    pred_vis = (pred_sigmoid * 255).clip(0, 255).astype(np.uint8)
     gt_vis = (gt * 255).clip(0, 255).astype(np.uint8)
 
     pred_color = cv2.applyColorMap(pred_vis, cv2.COLORMAP_JET)
@@ -68,21 +126,20 @@ def visualize(model_path, data_root, output_dir, device='cuda', frame_idx=0):
 
     h, w = pred_vis.shape
     canvas = np.zeros((h * 2 + 40, w, 3), dtype=np.uint8)
-
     canvas[0:h, :] = gt_color
-    cv2.putText(canvas, 'Ground Truth', (10, h + 25),
+    cv2.putText(canvas, "Ground Truth", (10, h + 25),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     canvas[h + 40:h * 2 + 40, :] = pred_color
-    cv2.putText(canvas, f'Prediction (max={pred.max():.3f}, mean={pred.mean():.4f})',
-                (10, h * 2 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    cv2.putText(canvas, f"Prediction (raw: [{pred.min():.2f},{pred.max():.2f}], sigmoid_mean={pred_sigmoid.mean():.4f})",
+                (10, h * 2 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
-    out_path = os.path.join(output_dir, 'bev_prediction.png')
+    out_path = os.path.join(output_dir, "bev_prediction.png")
     cv2.imwrite(out_path, canvas)
     print(f"[OK] Saved: {out_path}")
 
     overlay = gt_color.copy()
     thresh = 0.3
-    mask = pred > thresh
+    mask = pred_sigmoid > thresh
     overlay[mask] = (0.5 * overlay[mask] + 0.5 * pred_color[mask]).astype(np.uint8)
 
     for y in range(gt.shape[0]):
@@ -90,33 +147,27 @@ def visualize(model_path, data_root, output_dir, device='cuda', frame_idx=0):
             if gt[y, x] > 0.5:
                 cv2.circle(overlay, (x, y), 3, (0, 255, 0), -1)
 
-    pred_binary = (pred > thresh).astype(np.uint8)
-    contours, _ = cv2.findContours(pred_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    for cnt in contours:
-        M = cv2.moments(cnt)
-        if M['m00'] > 0:
-            cx = int(M['m10'] / M['m00'])
-            cy = int(M['m01'] / M['m00'])
-            cv2.circle(overlay, (cx, cy), 5, (0, 0, 255), 2)
-
-    overlay_path = os.path.join(output_dir, 'bev_overlay.png')
+    overlay_path = os.path.join(output_dir, "bev_overlay.png")
     cv2.imwrite(overlay_path, overlay)
     print(f"[OK] Saved: {overlay_path}")
 
     print(f"\n=== Prediction Stats ===")
-    print(f"pred max:  {pred.max():.4f}")
-    print(f"pred mean: {pred.mean():.6f}")
-    print(f"pred > 0.3 pixels: {(pred > 0.3).sum()}")
-    print(f"pred > 0.5 pixels: {(pred > 0.5).sum()}")
-    print(f"GT > 0.5 pixels:   {(gt > 0.5).sum()}")
+    print(f"raw logit range: [{pred.min():.4f}, {pred.max():.4f}]")
+    print(f"sigmoid mean:    {pred_sigmoid.mean():.6f}")
+    print(f"sigmoid > 0.3:   {(pred_sigmoid > 0.3).sum()} pixels")
+    print(f"sigmoid > 0.5:   {(pred_sigmoid > 0.5).sum()} pixels")
+    print(f"GT > 0.5:        {(gt > 0.5).sum()} pixels")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_path', required=True)
-    parser.add_argument('--data_root', required=True)
-    parser.add_argument('--output', default='outputs/visualization')
-    parser.add_argument('--device', default='cuda')
-    parser.add_argument('--frame', type=int, default=0)
+    parser.add_argument("--model_path", required=True)
+    parser.add_argument("--data_root", required=True)
+    parser.add_argument("--output", default="outputs/visualization")
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--frame", type=int, default=0)
+    parser.add_argument("--fusion_mode", default=DEFAULT_FUSION_MODE)
+    parser.add_argument("--backbone", default=DEFAULT_BACKBONE)
     args = parser.parse_args()
-    visualize(args.model_path, args.data_root, args.output, args.device, args.frame)
+    visualize(args.model_path, args.data_root, args.output, args.device, args.frame,
+              args.fusion_mode, args.backbone)

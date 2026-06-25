@@ -26,8 +26,8 @@ WildTrack synchronized multi-view images
 - fusion：`concat`（MVDet 原始方式，7 视角特征拼接）
 - BEV head：`MVDetMapClassifier`（3 层 dilated conv，无 BN，bias=False）
 - batch：`1`
-- optimizer：SGD（lr=0.1, momentum=0.5, weight_decay=5e-4）
-- scheduler：OneCycleLR（max_lr=0.1）
+- optimizer：SGD（lr=0.01, momentum=0.5, weight_decay=5e-4）
+- scheduler：OneCycleLR（max_lr=0.01）
 - epochs：10
 - `freeze_backbone_epochs=0`
 - augmentation：默认启用颜色抖动；水平翻转默认 `0.0`
@@ -86,15 +86,15 @@ python src/train_main.py \
   --batch 1 \
   --backbone resnet18 \
   --pretrained true \
-  --fusion_mode confidence_v2 \
+  --fusion_mode concat \
   --augment true \
   --augment_hflip_prob 0.0 \
   --augment_color_jitter 0.2,0.2,0.2,0.05 \
-  --optimizer adam \
-  --scheduler cosine \
-  --lr_init 0.0001 \
-  --weight_decay 0.0001 \
-  --freeze_backbone_epochs 3 \
+  --optimizer sgd \
+  --scheduler onecycle \
+  --lr_init 0.01 \
+  --weight_decay 0.0005 \
+  --freeze_backbone_epochs 0 \
   --device cuda
 ```
 
@@ -113,7 +113,7 @@ python src/evaluate_main.py \
   --data_root wildtrack \
   --views 0,1,2,3,4,5,6 \
   --backbone resnet18 \
-  --fusion_mode confidence_v2 \
+  --fusion_mode concat \
   --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth \
   --device cuda
 ```
@@ -125,7 +125,7 @@ python src/evaluate_main.py \
   --data_root wildtrack \
   --views 0,1,2,3,4,5,6 \
   --backbone resnet18 \
-  --fusion_mode confidence_v2 \
+  --fusion_mode concat \
   --model_path outputs/train_multicam_mvdet_style_v3/model_final.pth \
   --device cuda \
   --report_detection \
