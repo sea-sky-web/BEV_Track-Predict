@@ -212,3 +212,6 @@ The current model is considered valid only if it can:
 6. Report Precision, Recall, F1 score, MODA, MODP, and localization error.
 7. Compare naive fusion with spatial-aware confidence fusion.
 8. Save metrics for experiment comparison.
+
+Quantitative targets (MODA ≥ 0.30, SNR ≥ 1.0, etc.) and visual acceptance
+criteria for the BEV heatmap are defined in `docs/training_goals.md`.
