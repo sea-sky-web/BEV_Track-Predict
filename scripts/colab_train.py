@@ -175,6 +175,7 @@ if args.epochs > 0:
     "--bev_pos_weight",         str(args.bev_pos_weight),
     "--device",                 args.device,
     "--log_every",              "20",
+    "--amp",  # concat 融合 7 视角内存较大，AMP 节省约一半显存
 ]
 
     print("命令：", " ".join(train_cmd))
