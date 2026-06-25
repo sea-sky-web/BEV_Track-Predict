@@ -232,6 +232,7 @@ GitHub Actions 的 `Python Smoke` workflow 会安装 CPU 版 PyTorch，并覆盖
 ## 文档
 
 - 训练目标与预期效果：`docs/training_goals.md`
+- MVDet 对齐修复计划：`docs/mvdet_alignment_plan.md`
 - 模型边界：`docs/model_definition.md`
 - 实验协议：`docs/experiment_protocol.md`
 - 评估管线分析：`docs/eval_pipeline_analysis.md`
