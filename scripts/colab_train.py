@@ -178,7 +178,7 @@ eval_cmd = [
     "--report_detection",
     "--metrics_out",     str(eval_out),
     "--views",           "0,1,2,3,4,5,6",
-    "--det_thresholds",  "-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50",
+    "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50",
 ]
 print("命令：", " ".join(eval_cmd))
 eval_ret = run(eval_cmd, cwd=str(REPO_DIR), check=False)
