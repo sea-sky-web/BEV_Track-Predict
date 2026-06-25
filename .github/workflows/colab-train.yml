@@ -19,6 +19,10 @@ on:
         description: '训练帧数上限（更多帧 = 更多数据 = 更好泛化）'
         default: '100'
         required: false
+      checkpoint_run:
+        description: 'eval-only: 从指定 run number 下载 checkpoint（配合 epochs=0）'
+        default: ''
+        required: false
 
 jobs:
   train:
@@ -79,6 +83,24 @@ jobs:
             colab stop -s bev-train 2>/dev/null || true
             sleep 30
           done
+
+      - name: Upload checkpoint for eval-only
+        if: inputs.checkpoint_run != '' && inputs.epochs == '0'
+        run: |
+          echo "Downloading checkpoint from run ${{ inputs.checkpoint_run }}..."
+          gh run download ${{ inputs.checkpoint_run }} -n bev-checkpoint-run${{ inputs.checkpoint_run }} -D /tmp/ckpt 2>&1 || true
+          CKPT=$(find /tmp/ckpt -name 'model_final.pth' | head -1)
+          if [ -z "$CKPT" ]; then
+            echo "[ERROR] model_final.pth not found in run ${{ inputs.checkpoint_run }} artifacts"
+            exit 1
+          fi
+          echo "Found checkpoint: $CKPT ($(du -h "$CKPT" | cut -f1))"
+          REMOTE="/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3"
+          colab exec -s bev-train "import os; os.makedirs('$REMOTE', exist_ok=True)"
+          colab upload -s bev-train "$CKPT" "$REMOTE/model_final.pth"
+          echo "[OK] Checkpoint uploaded to Colab"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       # colab exec --timeout is inactivity timeout. Set high (7200s=2h) so long training
       # doesn't disconnect. The step-level timeout-minutes=240 is the hard wall.

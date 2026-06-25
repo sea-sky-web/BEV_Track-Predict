@@ -131,9 +131,10 @@ run([sys.executable, "-m", "pip", "install", "-q",
      "-r", str(REPO_DIR / "requirements.txt")])
 
 # ── 5. 训练 ──────────────────────────────────────────────────
-banner("5/6  开始训练")
+if args.epochs > 0:
+    banner("5/6  开始训练")
 
-train_cmd = [
+    train_cmd = [
     sys.executable, "scripts/train_main.py",
     "--data_root",              str(data_root),
     "--views",                  "0,1,2,3,4,5,6",
@@ -157,12 +158,14 @@ train_cmd = [
     "--log_every",              "20",
 ]
 
-print("命令：", " ".join(train_cmd))
-ret = run(train_cmd, cwd=str(REPO_DIR), check=False)
-if ret != 0:
-    sys.exit(ret)
+    print("命令：", " ".join(train_cmd))
+    ret = run(train_cmd, cwd=str(REPO_DIR), check=False)
+    if ret != 0:
+        sys.exit(ret)
 
-print(f"\n[OK] 训练完成")
+    print(f"\n[OK] 训练完成")
+else:
+    banner("5/6  跳过训练 (epochs=0, eval-only 模式)")
 
 # ── 6. 评估 + 可视化（同一 colab exec，避免 session 死亡）────────
 banner("6/6  检测评估 + 可视化")
