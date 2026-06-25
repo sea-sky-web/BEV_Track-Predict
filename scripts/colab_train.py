@@ -59,10 +59,29 @@ args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
 banner("1/6  克隆 / 更新仓库")
-if REPO_DIR.exists():
+if REPO_DIR.exists() and (REPO_DIR / ".git").exists():
     run(["git", "-C", str(REPO_DIR), "pull", "--ff-only"], check=False)
 else:
-    run(["git", "clone", REPO_URL, str(REPO_DIR)])
+    if REPO_DIR.exists():
+        # Directory exists but not a git repo (e.g. created by checkpoint upload)
+        # Preserve outputs/ then clone fresh
+        import shutil
+        saved = {}
+        outputs = REPO_DIR / "outputs"
+        if outputs.exists():
+            tmp_out = Path("/tmp/_bev_outputs_save")
+            if tmp_out.exists():
+                shutil.rmtree(tmp_out)
+            shutil.move(str(outputs), str(tmp_out))
+            saved["outputs"] = tmp_out
+        shutil.rmtree(str(REPO_DIR))
+        run(["git", "clone", REPO_URL, str(REPO_DIR)])
+        for name, tmp in saved.items():
+            dest = REPO_DIR / name
+            if not dest.exists():
+                shutil.move(str(tmp), str(dest))
+    else:
+        run(["git", "clone", REPO_URL, str(REPO_DIR)])
 
 os.chdir(str(REPO_DIR))
 
