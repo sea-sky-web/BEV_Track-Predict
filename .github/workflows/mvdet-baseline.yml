@@ -1,0 +1,108 @@
+name: MVDet Baseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      gpu:
+        description: 'GPU 型号（T4 / L4 / A100）'
+        default: 'T4'
+        required: false
+      epochs:
+        description: '训练轮数'
+        default: '10'
+        required: false
+
+jobs:
+  baseline:
+    name: MVDet Baseline on Colab ${{ inputs.gpu }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install colab-cli
+        run: pip install google-colab-cli
+
+      - name: Restore Colab credentials
+        env:
+          COLAB_REFRESH_TOKEN: ${{ secrets.COLAB_REFRESH_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          token = os.environ["COLAB_REFRESH_TOKEN"].strip()
+          assert token, "COLAB_REFRESH_TOKEN is empty"
+          creds = {
+              "token": None,
+              "refresh_token": token,
+              "token_uri": "https://oauth2.googleapis.com/token",
+              "client_id": "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
+              "client_secret": "d-FL95Q19q7MQmFpd7hHD0Ty",
+              "scopes": [
+                  "openid",
+                  "https://www.googleapis.com/auth/userinfo.profile",
+                  "https://www.googleapis.com/auth/userinfo.email",
+                  "https://www.googleapis.com/auth/cloud-platform",
+                  "https://www.googleapis.com/auth/colaboratory",
+                  "https://www.googleapis.com/auth/drive.file"
+              ],
+              "universe_domain": "googleapis.com",
+              "account": "",
+              "expiry": None
+          }
+          path = os.path.expanduser("~/.config/colab-cli/token.json")
+          os.makedirs(os.path.dirname(path), exist_ok=True)
+          with open(path, "w") as f:
+              json.dump(creds, f)
+          print("[OK] token.json constructed from refresh_token")
+          EOF
+
+      - name: Create Colab session
+        run: |
+          colab stop -s bev-train 2>/dev/null || true
+          sleep 15
+          for attempt in 1 2 3; do
+            echo "=== Create session attempt $attempt ==="
+            colab new --gpu ${{ inputs.gpu }} --session bev-train && break
+            echo "Attempt $attempt failed, retrying in 30s..."
+            colab stop -s bev-train 2>/dev/null || true
+            sleep 30
+          done
+
+      # 先下载 WildTrack 数据（复用 colab_train.py 的数据下载逻辑）
+      - name: Download WildTrack data
+        timeout-minutes: 30
+        run: |
+          {
+            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '0', '--max_frames', '1']"
+            cat scripts/colab_train.py
+          } | colab exec -s bev-train --timeout 1800
+
+      # 运行 MVDet 基线
+      - name: Run MVDet baseline
+        timeout-minutes: 240
+        continue-on-error: true
+        run: |
+          {
+            echo "import sys; sys.argv = ['run_mvdet_baseline.py']"
+            cat scripts/run_mvdet_baseline.py
+          } | colab exec -s bev-train --timeout 7200
+
+      # 运行逐层对比
+      - name: Compare layers
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          colab exec -s bev-train --timeout 600 <<'COMPARE'
+          import subprocess, sys
+          sys.path.insert(0, '/content/BEV_Track-Predict')
+          cmd = [sys.executable, '/content/BEV_Track-Predict/scripts/compare_layers.py',
+                 '--data_root', '/content/BEV_Track-Predict/wildtrack',
+                 '--mvdet_dir', '/content/MVDet']
+          subprocess.call(cmd)
+          COMPARE
+
+      - name: Stop Colab session
+        if: always()
+        run: colab stop -s bev-train || true
