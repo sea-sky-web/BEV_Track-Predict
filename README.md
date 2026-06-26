@@ -26,8 +26,8 @@ WildTrack synchronized multi-view images
 - fusion：`concat`（MVDet 原始方式，7 视角特征拼接）
 - BEV head：`MVDetMapClassifier`（3 层 dilated conv，无 BN，bias=False）
 - batch：`1`
-- optimizer：SGD（lr=0.01, momentum=0.5, weight_decay=5e-4）
-- scheduler：OneCycleLR（max_lr=0.01）
+- optimizer：SGD（lr=0.05, momentum=0.5, weight_decay=5e-4）
+- scheduler：OneCycleLR（max_lr=0.05）
 - epochs：10
 - `freeze_backbone_epochs=0`
 - augmentation：默认启用颜色抖动；水平翻转默认 `0.0`
@@ -92,7 +92,7 @@ python src/train_main.py \
   --augment_color_jitter 0.2,0.2,0.2,0.05 \
   --optimizer sgd \
   --scheduler onecycle \
-  --lr_init 0.01 \
+  --lr_init 0.05 \
   --weight_decay 0.0005 \
   --freeze_backbone_epochs 0 \
   --device cuda

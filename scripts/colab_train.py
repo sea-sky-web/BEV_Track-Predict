@@ -169,7 +169,7 @@ if args.epochs > 0:
     "--alpha",                  "1.0",
     "--optimizer",              "sgd",
     "--scheduler",              "onecycle",
-    "--lr_init",                "0.01",
+    "--lr_init",                "0.05",
     "--weight_decay",           "0.0005",
     "--freeze_backbone_epochs", "0",
     "--bev_pos_weight",         str(args.bev_pos_weight),

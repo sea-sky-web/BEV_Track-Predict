@@ -1,0 +1,48 @@
+{
+  "exp_name": "concat_sgd_lr001_ep10_mf100",
+  "success": true,
+  "return_code": 0,
+  "ga_run_id": 28171207996,
+  "ga_run_number": 48,
+  "git_commit": "23bb14a",
+  "timestamp": "20260625_210000",
+  "config": {
+    "backbone": "resnet18",
+    "pretrained": true,
+    "fusion_mode": "concat",
+    "optimizer": "sgd",
+    "scheduler": "onecycle",
+    "lr_init": 0.01,
+    "momentum": 0.5,
+    "weight_decay": 0.0005,
+    "epochs": 10,
+    "max_frames": 100,
+    "batch": 1,
+    "bev_pos_weight": 10.0,
+    "views": "0,1,2,3,4,5,6",
+    "amp": true,
+    "grad_clip_max_norm": 1.0,
+    "freeze_backbone_epochs": 0,
+    "gpu": "T4"
+  },
+  "train_metrics": {
+    "final_loss": 0.0845,
+    "final_bev_loss": 0.0825,
+    "final_img_loss": 0.0021,
+    "final_raw_pos_mse": 0.0952,
+    "final_snr": 0.534,
+    "gradient_explosion": false
+  },
+  "detection_metrics": {
+    "det_best_threshold": 0.40,
+    "det_moda": -0.461,
+    "det_modp": 0.423,
+    "det_precision": 0.086,
+    "det_recall": 0.055,
+    "det_f1": 0.067,
+    "det_tp": 862,
+    "det_fp": 5254,
+    "det_fn": 8656,
+    "det_loc_err_m": 0.195
+  }
+}
