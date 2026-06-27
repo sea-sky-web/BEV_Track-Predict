@@ -1,0 +1,3 @@
+## 2023-10-27 - [Optimize Perspective Projection]
+**Learning:** For PyTorch grid sampling and perspective warping, using `float32` coordinate arithmetic with `torch.bmm` is highly performant. Out-of-bounds handling should leverage `grid_sample`'s native `padding_mode` by pushing invalid coordinates out-of-bounds rather than using complex arithmetic penalties or slow mask-filling operations like `torch.nan_to_num`.
+**Action:** Always prefer `float32` for geometric projections meant for `grid_sample`, and use valid pushing (e.g. `invalid = z <= 1e-6; coords = torch.where(invalid, 2.0, coords)`) over heavy boolean masking or `nan_to_num`.
