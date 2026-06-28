@@ -10,13 +10,15 @@ import math
 import torch
 
 
-def parse_color_jitter(raw: str | Sequence[float]) -> tuple[float, float, float, float]:
+def parse_color_jitter(
+        raw: str | Sequence[float]) -> tuple[float, float, float, float]:
     if isinstance(raw, str):
         vals = [float(x.strip()) for x in raw.split(",") if x.strip()]
     else:
         vals = [float(x) for x in raw]
     if len(vals) != 4:
-        raise ValueError("color_jitter must contain brightness,contrast,saturation,hue")
+        raise ValueError(
+            "color_jitter must contain brightness,contrast,saturation,hue")
     if any(v < 0.0 for v in vals):
         raise ValueError(f"color_jitter values must be >= 0, got {vals}")
     if vals[3] > 0.5:
@@ -39,7 +41,9 @@ class ViewCoherentAugment:
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.hflip_prob <= 1.0:
-            raise ValueError(f"hflip_prob must be in [0,1], got {self.hflip_prob}")
+            raise ValueError(
+                f"hflip_prob must be in [0,1], got {
+                    self.hflip_prob}")
         self.color_jitter = parse_color_jitter(self.color_jitter)
 
     def _sample_factor(self, amount: float) -> float:
@@ -57,31 +61,79 @@ class ViewCoherentAugment:
             hue_delta,
         )
 
-    def _adjust_hue(self, img: torch.Tensor, hue_delta: float) -> torch.Tensor:
+    def _photometric_batch(self,
+                           imgs: torch.Tensor,
+                           factors: tuple[float,
+                                          float,
+                                          float,
+                                          float]) -> torch.Tensor:
+        """
+        ⚡ Bolt Optimization: Vectorized batch-wise photometric augmentation.
+        Process all views simultaneously without python loops, accelerating training data loading.
+        """
+        brightness, contrast, saturation, hue_delta = factors
+        out = imgs * brightness
+        out.clamp_(0.0, 1.0)
+
+        mean = out.mean(dim=(-2, -1), keepdim=True)
+        out = (out - mean) * contrast + mean
+        out.clamp_(0.0, 1.0)
+
+        gray = out.mean(dim=-3, keepdim=True)
+        out = (out - gray) * saturation + gray
+        out.clamp_(0.0, 1.0)
+
         if hue_delta == 0.0:
-            return img
+            return out
+
         angle = float(hue_delta) * 2.0 * math.pi
         cos_a = math.cos(angle)
         sin_a = math.sin(angle)
-        mat = img.new_tensor(
-            [
-                [0.299 + 0.701 * cos_a + 0.168 * sin_a, 0.587 - 0.587 * cos_a + 0.330 * sin_a, 0.114 - 0.114 * cos_a - 0.497 * sin_a],
-                [0.299 - 0.299 * cos_a - 0.328 * sin_a, 0.587 + 0.413 * cos_a + 0.035 * sin_a, 0.114 - 0.114 * cos_a + 0.292 * sin_a],
-                [0.299 - 0.300 * cos_a + 1.250 * sin_a, 0.587 - 0.588 * cos_a - 1.050 * sin_a, 0.114 + 0.886 * cos_a - 0.203 * sin_a],
-            ]
-        )
-        flat = img.reshape(3, -1)
-        return (mat @ flat).reshape_as(img).clamp(0.0, 1.0)
 
-    def _photometric(self, img: torch.Tensor, factors: tuple[float, float, float, float]) -> torch.Tensor:
-        brightness, contrast, saturation, hue_delta = factors
-        out = img
-        out = (out * brightness).clamp(0.0, 1.0)
-        mean = out.mean(dim=(1, 2), keepdim=True)
-        out = ((out - mean) * contrast + mean).clamp(0.0, 1.0)
-        gray = out.mean(dim=0, keepdim=True)
-        out = ((out - gray) * saturation + gray).clamp(0.0, 1.0)
-        return self._adjust_hue(out, hue_delta)
+        mat = out.new_tensor([[0.299 +
+                               0.701 *
+                               cos_a +
+                               0.168 *
+                               sin_a, 0.587 -
+                               0.587 *
+                               cos_a +
+                               0.330 *
+                               sin_a, 0.114 -
+                               0.114 *
+                               cos_a -
+                               0.497 *
+                               sin_a], [0.299 -
+                                        0.299 *
+                                        cos_a -
+                                        0.328 *
+                                        sin_a, 0.587 +
+                                        0.413 *
+                                        cos_a +
+                                        0.035 *
+                                        sin_a, 0.114 -
+                                        0.114 *
+                                        cos_a +
+                                        0.292 *
+                                        sin_a], [0.299 -
+                                                 0.300 *
+                                                 cos_a +
+                                                 1.250 *
+                                                 sin_a, 0.587 -
+                                                 0.588 *
+                                                 cos_a -
+                                                 1.050 *
+                                                 sin_a, 0.114 +
+                                                 0.886 *
+                                                 cos_a -
+                                                 0.203 *
+                                                 sin_a], ])
+
+        # Apply matrix multiplication efficiently over the flattened batch
+        # ⚡ Bolt Optimization: Use 1x1 conv pattern via matmul for massive speedups across views
+        return torch.matmul(
+            mat.view(1, 3, 3),
+            out.view(out.size(0), 3, -1)
+        ).view_as(out).clamp_(0.0, 1.0)
 
     def __call__(
         self,
@@ -93,7 +145,7 @@ class ViewCoherentAugment:
             return imgs, map_gt, aux_gt
 
         factors = self._sample_photometric_factors()
-        aug_imgs = torch.stack([self._photometric(img, factors) for img in imgs], dim=0)
+        aug_imgs = self._photometric_batch(imgs, factors)
         if random.random() < self.hflip_prob:
             aug_imgs = torch.flip(aug_imgs, dims=(-1,))
             map_gt = torch.flip(map_gt, dims=(-1,))
