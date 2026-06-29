@@ -89,7 +89,11 @@ def load_mvdet(data_root: str, mvdet_dir: str):
 
 def load_ours(data_root: str):
     """加载我们的模型，提取投影矩阵和中间输出。"""
-    src_dir = str(Path(__file__).resolve().parent.parent / "src")
+    # __file__ 在 colab exec (IPython kernel) 中不可用，用显式路径
+    repo_dir = Path("/content/BEV_Track-Predict")
+    src_dir = str(repo_dir / "src")
+    if not Path(src_dir).exists():
+        src_dir = str(Path(__file__).resolve().parent.parent / "src")
     sys.path.insert(0, src_dir)
 
     from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_pom, scale_intrinsics
