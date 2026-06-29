@@ -115,12 +115,17 @@ jobs:
         timeout-minutes: 10
         run: |
           colab exec -s bev-train --timeout 600 <<'COMPARE'
-          import subprocess, sys
-          cmd = [sys.executable, '/content/BEV_Track-Predict/scripts/compare_layers.py',
-                 '--data_root', '/content/BEV_Track-Predict/wildtrack',
-                 '--mvdet_dir', '/content/MVDet']
-          ret = subprocess.call(cmd)
-          print(f"\n[COMPARE] exit code: {ret}")
+          import subprocess, sys, traceback
+          try:
+              ret = subprocess.call(
+                  [sys.executable, '-u', '/content/BEV_Track-Predict/scripts/compare_layers.py',
+                   '--data_root', '/content/BEV_Track-Predict/wildtrack',
+                   '--mvdet_dir', '/content/MVDet'],
+                  stderr=subprocess.STDOUT)
+              print(f"\n[COMPARE] exit code: {ret}")
+          except Exception as e:
+              traceback.print_exc()
+              print(f"\n[COMPARE] crashed: {e}")
           COMPARE
 
       # 可选：运行 MVDet 训练
