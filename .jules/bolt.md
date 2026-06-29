@@ -1,0 +1,3 @@
+## 2025-06-29 - [PyTorch Grid Sampling Optimization]
+**Learning:** Using `float32` arithmetic, `torch.bmm` for batched transformations, and native `grid_sample` `padding_mode="zeros"` for out-of-bounds handling (by manually pushing invalid coordinates out-of-bounds like `2.0`) drastically speeds up PyTorch perspective warping (e.g., from ~7.0s to ~5.0s per 10 iterations) while avoiding computationally expensive masks like `nan_to_num` or conditional processing like `torch.where` on large grid coordinate tensors.
+**Action:** When implementing perspective warps or custom grid sampling on CPU, prefer `torch.float32` coordinate arithmetic and batched operations (`bmm`) over broadcasting. Leverage `padding_mode` to handle invalid projections efficiently.
