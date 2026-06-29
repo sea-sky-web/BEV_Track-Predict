@@ -12,13 +12,12 @@
 ORIGINE_X_M = -3.0
 ORIGINE_Y_M = -9.0
 
-# BEV 网格分辨率
-NB_WIDTH = 480      # x 方向网格数（单位：0.025m）
-NB_HEIGHT = 1440    # y 方向网格数
+# BEV 网格分辨率（WildTrack ij-indexing: 480=N_row=Height, 1440=N_col=Width）
+NB_WIDTH = 1440     # j 方向（列数），世界坐标 y 方向
+NB_HEIGHT = 480     # i 方向（行数），世界坐标 x 方向
 
-# 网格步长计算（米）
-WIDTH_M = 12.0                        # 实际宽度（米）
-STEP_M = WIDTH_M / NB_WIDTH           # 0.025 m/bin
+# 网格步长（来自 rectangles.pom STEP=0.025m，所有方向一致）
+STEP_M = 0.025                        # 0.025 m/bin
 
 
 # ============================================================================
@@ -67,9 +66,9 @@ DEFAULT_ALPHA = 1.0                    # 图像损失权重
 DEFAULT_BEV_POS_WEIGHT = 10.0           # BEV 正样本损失权重（正负比 ~20:1，取保守值）
 DEFAULT_BEV_NEG_WEIGHT = 1.0            # BEV 负样本损失权重
 DEFAULT_MAP_KSIZE = 41                 # BEV 热图高斯核大小（MVDet: 41）
-DEFAULT_MAP_SIGMA = 5.0                # BEV 热图高斯标准差（MVDet: 5.0）
+DEFAULT_MAP_SIGMA = 2.2361             # MVDet: cov=I*5.0 → variance=5.0 → sigma=sqrt(5)≈2.2361
 DEFAULT_IMG_KSIZE = 21                 # 图像热图高斯核大小（MVDet: 21）
-DEFAULT_IMG_SIGMA = 2.5                # 图像热图高斯标准差（MVDet: 2.5）
+DEFAULT_IMG_SIGMA = 1.5811             # MVDet: cov=I*2.5 → variance=2.5 → sigma=sqrt(2.5)≈1.5811
 
 # 优化器（MVDet 默认：SGD lr=0.1 + OneCycleLR）
 DEFAULT_OPTIMIZER = "sgd"

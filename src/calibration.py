@@ -30,7 +30,7 @@ def parse_rectangles_pom(pom_path: Path) -> Dict[str, float]:
         
     Example:
         >>> pom_dict = parse_rectangles_pom(Path("wildtrack/rectangles.pom"))
-        >>> print(pom_dict.get("NB_WIDTH", 480))
+        >>> print(pom_dict.get("NB_WIDTH", 1440))
         480
     """
     if not pom_path.exists():

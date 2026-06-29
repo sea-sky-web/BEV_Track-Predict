@@ -190,12 +190,12 @@ class WildtrackMVDetDataset(Dataset):
                 continue
             
             pos_id = int(pos_id)
-            ix = pos_id % self.nb_w  # x 网格索引
-            iy = pos_id // self.nb_w  # y 网格索引
+            ix = pos_id % self.nb_h  # i 方向索引（行，MVDet: grid_x = pos % 480）
+            iy = pos_id // self.nb_h  # j 方向索引（列，MVDet: grid_y = pos // 480）
             
-            # 生成 BEV 全局热图
-            if 0 <= iy < self.nb_h and 0 <= ix < self.nb_w:
-                map_gt[0, iy, ix] = 1.0
+            # 生成 BEV 全局热图（ij-indexing: ix=行, iy=列）
+            if 0 <= ix < self.nb_h and 0 <= iy < self.nb_w:
+                map_gt[0, ix, iy] = 1.0
             
             # 转换到世界坐标系（使用网格中心）
             Xw = self.ox + (ix + 0.5) * self.step

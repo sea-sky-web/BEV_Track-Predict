@@ -169,8 +169,8 @@ def _build_projection(
     unit_scale = decide_unit_scale(step_m, t_norms)
     print(f"[UNIT] step={step_m}, median||t||={np.median(t_norms):.2f} => unit_scale={unit_scale}")
 
-    hb = int(pom.get("NB_HEIGHT", 1440)) // bev_down
-    wb = int(pom.get("NB_WIDTH", 480)) // bev_down
+    hb = int(pom.get("NB_HEIGHT", 480)) // bev_down
+    wb = int(pom.get("NB_WIDTH", 1440)) // bev_down
     hf, wf = feat_hw
 
     sx_f = wf / IMG_ORI_W

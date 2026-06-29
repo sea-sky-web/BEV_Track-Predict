@@ -202,8 +202,8 @@ def main():
     # ========== 2. 构建投影矩阵 ==========
     print("\n[GRID] Building projection matrices...")
     
-    Hb = int(pom.get("NB_HEIGHT", 1440)) // args.bev_down
-    Wb = int(pom.get("NB_WIDTH", 480)) // args.bev_down
+    Hb = int(pom.get("NB_HEIGHT", 480)) // args.bev_down
+    Wb = int(pom.get("NB_WIDTH", 1440)) // args.bev_down
     Hf, Wf = args.feat_h, args.feat_w
     
     print(f"[CFG] img={args.img_h}x{args.img_w}, "

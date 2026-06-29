@@ -80,8 +80,8 @@ def main() -> int:
     calib_cache, t_norms = CalibrationLoader(data_root / "calibrations", CAM_NAMES).load_all(views)
     step_m = float(pom.get("STEP", 0.025))
     unit_scale = decide_unit_scale(step_m, t_norms)
-    hb = int(pom.get("NB_HEIGHT", 1440)) // args.bev_down
-    wb = int(pom.get("NB_WIDTH", 480)) // args.bev_down
+    hb = int(pom.get("NB_HEIGHT", 480)) // args.bev_down
+    wb = int(pom.get("NB_WIDTH", 1440)) // args.bev_down
 
     sx_f = args.feat_w / IMG_ORI_W
     sy_f = args.feat_h / IMG_ORI_H
