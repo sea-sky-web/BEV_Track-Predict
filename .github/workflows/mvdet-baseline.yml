@@ -8,8 +8,12 @@ on:
         default: 'T4'
         required: false
       epochs:
-        description: '训练轮数'
-        default: '10'
+        description: '训练轮数（MVDet 全量数据每 epoch ~108min on T4，建议 L4+2 epoch 或 T4+1 epoch）'
+        default: '2'
+        required: false
+      skip_train:
+        description: '跳过训练，只运行逐层对比（true/false）'
+        default: 'false'
         required: false
 
 jobs:
@@ -70,7 +74,7 @@ jobs:
             sleep 30
           done
 
-      # 先下载 WildTrack 数据（复用 colab_train.py 的数据下载逻辑）
+      # 下载 WildTrack 数据 + clone 仓库（复用 colab_train.py 的数据下载，epochs=0 跳过训练）
       - name: Download WildTrack data
         timeout-minutes: 30
         run: |
@@ -79,29 +83,75 @@ jobs:
             cat scripts/colab_train.py
           } | colab exec -s bev-train --timeout 1800
 
-      # 运行 MVDet 基线
-      - name: Run MVDet baseline
-        timeout-minutes: 240
-        continue-on-error: true
-        run: |
-          {
-            echo "import sys; sys.argv = ['run_mvdet_baseline.py']"
-            cat scripts/run_mvdet_baseline.py
-          } | colab exec -s bev-train --timeout 7200
-
-      # 运行逐层对比
-      - name: Compare layers
+      # Clone MVDet 并安装依赖（不训练，快速完成）
+      - name: Setup MVDet
         timeout-minutes: 10
-        continue-on-error: true
+        run: |
+          colab exec -s bev-train --timeout 600 <<'SETUP'
+          import subprocess, sys, os
+          subprocess.call([sys.executable, '-m', 'pip', 'install', '-q', 'kornia', 'scipy'])
+          if not os.path.exists('/content/MVDet'):
+              subprocess.call(['git', 'clone', '--depth', '1', 'https://github.com/hou-yz/MVDet.git', '/content/MVDet'])
+          # Patch to single GPU
+          model_file = '/content/MVDet/multiview_detector/models/persp_trans_detector.py'
+          with open(model_file) as f:
+              code = f.read()
+          if "'cuda:1'" in code:
+              with open(model_file, 'w') as f:
+                  f.write(code.replace("'cuda:1'", "'cuda:0'"))
+              print("[OK] Patched cuda:1 -> cuda:0")
+          # Symlink data
+          import pathlib
+          dst = pathlib.Path(os.path.expanduser('~/Data/Wildtrack'))
+          dst.parent.mkdir(parents=True, exist_ok=True)
+          if dst.exists() or dst.is_symlink():
+              dst.unlink()
+          dst.symlink_to('/content/BEV_Track-Predict/wildtrack')
+          print(f"[OK] {dst} -> /content/BEV_Track-Predict/wildtrack")
+          SETUP
+
+      # 逐层对比（不需要训练，只比较投影矩阵/GT/kernel 等）
+      - name: Compare layers (no training needed)
+        timeout-minutes: 10
         run: |
           colab exec -s bev-train --timeout 600 <<'COMPARE'
           import subprocess, sys
-          sys.path.insert(0, '/content/BEV_Track-Predict')
           cmd = [sys.executable, '/content/BEV_Track-Predict/scripts/compare_layers.py',
                  '--data_root', '/content/BEV_Track-Predict/wildtrack',
                  '--mvdet_dir', '/content/MVDet']
-          subprocess.call(cmd)
+          ret = subprocess.call(cmd)
+          print(f"\n[COMPARE] exit code: {ret}")
           COMPARE
+
+      # 可选：运行 MVDet 训练
+      - name: Run MVDet training
+        if: inputs.skip_train != 'true'
+        timeout-minutes: 300
+        continue-on-error: true
+        run: |
+          colab exec -s bev-train --timeout 18000 <<TRAIN
+          import subprocess, sys, os
+          os.chdir('/content/MVDet')
+          cmd = [sys.executable, 'main.py', '-d', 'wildtrack', '--arch', 'resnet18',
+                 '--epochs', '${{ inputs.epochs }}', '--lr', '0.1', '--batch_size', '1',
+                 '--momentum', '0.5', '--weight_decay', '5e-4', '--log_interval', '50', '--seed', '1']
+          print(f">>> {' '.join(cmd)}", flush=True)
+          ret = subprocess.call(cmd)
+          print(f"\n[TRAIN] exit code: {ret}")
+
+          # Print results
+          import pathlib, glob
+          log_dirs = sorted(pathlib.Path('logs/wildtrack_frame/default').glob('*'))
+          if log_dirs:
+              log_file = log_dirs[-1] / 'log.txt'
+              if log_file.exists():
+                  lines = log_file.read_text().splitlines()
+                  moda_lines = [l for l in lines if 'moda:' in l.lower()]
+                  print('\n=== MVDet BASELINE RESULTS ===')
+                  for l in moda_lines[-5:]:
+                      print(l)
+                  print('=== END MVDet BASELINE ===')
+          TRAIN
 
       - name: Stop Colab session
         if: always()
