@@ -114,13 +114,6 @@ jobs:
             cat scripts/colab_train.py
           } | colab exec -s bev-train --timeout 7200
 
-      - name: Download checkpoint
-        if: always()
-        run: |
-          REMOTE="/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3"
-          colab download -s bev-train "$REMOTE/model_final.pth" ./model_final.pth || true
-          colab download -s bev-train "$REMOTE/metrics.csv"    ./metrics.csv      || true
-
       - name: Run evaluation + visualization (single session)
         if: always()
         timeout-minutes: 25
@@ -170,13 +163,33 @@ jobs:
           print(f"\n>>> {viz_cmd}", flush=True)
           ret2 = subprocess.call(viz_cmd, shell=True)
           print(f"[VIZ] exit code: {ret2}", flush=True)
+
+          # --- Base64 encode key files to stdout for reliable extraction ---
+          import base64
+          files_to_export = [
+              '/content/BEV_Track-Predict/outputs/eval_results.json',
+              '/content/BEV_Track-Predict/outputs/visualization/bev_prediction.png',
+              '/content/BEV_Track-Predict/outputs/visualization/bev_overlay.png',
+          ]
+          for fpath in files_to_export:
+              fp = pathlib.Path(fpath)
+              if fp.exists():
+                  data = base64.b64encode(fp.read_bytes()).decode()
+                  print(f"\n===B64_START {fp.name}===", flush=True)
+                  for i in range(0, len(data), 76):
+                      print(data[i:i+76], flush=True)
+                  print(f"===B64_END {fp.name}===", flush=True)
+              else:
+                  print(f"[WARN] {fp.name} not found, skip base64 export", flush=True)
           EVALVIZ
 
-      - name: Download evaluation results
+      - name: Download checkpoint and results
         if: always()
         run: |
           REMOTE="/content/BEV_Track-Predict/outputs"
           colab download -s bev-train "$REMOTE/eval_results.json" ./eval_results.json || true
+          colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/model_final.pth" ./model_final.pth || true
+          colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/metrics.csv" ./metrics.csv || true
 
       - name: Print evaluation summary
         if: always()
@@ -211,6 +224,27 @@ jobs:
           VIZ_REMOTE="/content/BEV_Track-Predict/outputs/visualization"
           colab download -s bev-train "$VIZ_REMOTE/bev_prediction.png" ./bev_prediction.png || true
           colab download -s bev-train "$VIZ_REMOTE/bev_overlay.png"    ./bev_overlay.png    || true
+
+      - name: Extract base64 files from eval log (fallback)
+        if: always()
+        run: |
+          # If colab download failed, extract files from the eval step's stdout
+          # The eval step prints ===B64_START filename=== ... ===B64_END filename===
+          LOG=$(gh run view ${{ github.run_id }} --log 2>/dev/null || true)
+          for fname in eval_results.json bev_prediction.png bev_overlay.png; do
+            if [ ! -f "$fname" ] || [ ! -s "$fname" ]; then
+              echo "Extracting $fname from log (base64 fallback)..."
+              echo "$LOG" | sed -n "/===B64_START ${fname}===/,/===B64_END ${fname}===/p" | grep -v "===B64_" | sed 's/^.*Z //' | tr -d '\r\n ' | base64 -d > "$fname" 2>/dev/null || true
+              if [ -s "$fname" ]; then
+                echo "[OK] Extracted $fname ($(wc -c < "$fname") bytes)"
+              else
+                rm -f "$fname"
+                echo "[WARN] Could not extract $fname"
+              fi
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Upload artifacts
         if: always()
