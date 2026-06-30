@@ -108,8 +108,25 @@ else:
         "-O", str(REPO_DIR),
     ], check=False)
     if ret != 0:
-        print("[ERROR] gdown --folder 下载失败")
-        sys.exit(1)
+        print("[WARN] gdown --folder 下载失败，尝试 fallback 路径 ...")
+        fallback_paths = [
+            Path("/content/wildtrack"),
+            Path("/content/BEV_Track-Predict/wildtrack"),
+            Path("/root/wildtrack"),
+        ]
+        found_fallback = False
+        for fb in fallback_paths:
+            if fb.is_dir() and (fb / "Image_subsets").exists():
+                import shutil
+                if data_root.exists():
+                    shutil.rmtree(str(data_root))
+                shutil.copytree(str(fb), str(data_root))
+                print(f"[OK] 使用 fallback 数据：{fb}")
+                found_fallback = True
+                break
+        if not found_fallback:
+            print("[ERROR] gdown 下载失败且无可用 fallback 数据")
+            sys.exit(1)
 
     # Drive 文件夹可能直接包含 wildtrack.zip — 解压
     zip_path = REPO_DIR / "wildtrack.zip"
