@@ -118,37 +118,67 @@ def visualize(model_path, data_root, output_dir, device="cuda", frame_idx=0,
     gt = F.adaptive_max_pool2d(map_gt.unsqueeze(0), output_size=map_logits.shape[-2:])[0, 0].numpy()
 
     pred_sigmoid = 1.0 / (1.0 + np.exp(-np.clip(pred, -20, 20)))
-    pred_vis = (pred_sigmoid * 255).clip(0, 255).astype(np.uint8)
-    gt_vis = (gt * 255).clip(0, 255).astype(np.uint8)
+
+    # --- Normalize for visibility ---
+    # GT: binary dots are tiny on 120x360, dilate to make visible
+    gt_binary = (gt > 0.5).astype(np.uint8)
+    gt_dilated = cv2.dilate(gt_binary, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+    gt_vis = (gt_dilated * 255).astype(np.uint8)
+
+    # Pred: normalize to full [0,255] range for contrast
+    pred_norm = pred_sigmoid.copy()
+    pmax = pred_norm.max()
+    if pmax > 0:
+        pred_norm = pred_norm / pmax
+    pred_vis = (pred_norm * 255).clip(0, 255).astype(np.uint8)
 
     pred_color = cv2.applyColorMap(pred_vis, cv2.COLORMAP_JET)
     gt_color = cv2.applyColorMap(gt_vis, cv2.COLORMAP_JET)
 
+    # Draw green circles on GT for each pedestrian center
+    gt_points = np.argwhere(gt > 0.5)  # (row, col)
+    for r, c in gt_points:
+        cv2.circle(gt_color, (c, r), 5, (0, 255, 0), 2)
+
     h, w = pred_vis.shape
-    canvas = np.zeros((h * 2 + 40, w, 3), dtype=np.uint8)
-    canvas[0:h, :] = gt_color
-    cv2.putText(canvas, "Ground Truth", (10, h + 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    canvas[h + 40:h * 2 + 40, :] = pred_color
-    cv2.putText(canvas, f"Prediction (raw: [{pred.min():.2f},{pred.max():.2f}], sigmoid_mean={pred_sigmoid.mean():.4f})",
-                (10, h * 2 + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    # Scale up for visibility (120x360 is very small)
+    scale = 3
+    gt_big = cv2.resize(gt_color, (w * scale, h * scale), interpolation=cv2.INTER_NEAREST)
+    pred_big = cv2.resize(pred_color, (w * scale, h * scale), interpolation=cv2.INTER_NEAREST)
+    hs, ws = h * scale, w * scale
+
+    canvas = np.zeros((hs * 2 + 60, ws, 3), dtype=np.uint8)
+    canvas[0:hs, :] = gt_big
+    cv2.putText(canvas, f"Ground Truth ({gt_points.shape[0]} pedestrians)", (10, hs + 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    canvas[hs + 60:hs * 2 + 60, :] = pred_big
+    cv2.putText(canvas, f"Prediction (logit:[{pred.min():.2f},{pred.max():.2f}] sig>{0.3:.1f}:{(pred_sigmoid > 0.3).sum()}px)",
+                (10, hs * 2 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
     out_path = os.path.join(output_dir, "bev_prediction.png")
     cv2.imwrite(out_path, canvas)
     print(f"[OK] Saved: {out_path}")
 
-    overlay = gt_color.copy()
+    # --- Overlay: prediction heatmap + GT circles ---
+    overlay = pred_color.copy()
     thresh = 0.3
-    mask = pred_sigmoid > thresh
-    overlay[mask] = (0.5 * overlay[mask] + 0.5 * pred_color[mask]).astype(np.uint8)
+    # Mark GT positions with green circles
+    for r, c in gt_points:
+        cv2.circle(overlay, (c, r), 5, (0, 255, 0), 2)
+    # Mark detections (pred > thresh) with red circles
+    det_points = np.argwhere(pred_sigmoid > thresh)
+    # Use NMS-style: find local maxima
+    from scipy.ndimage import maximum_filter
+    local_max = maximum_filter(pred_sigmoid, size=5)
+    peaks = (pred_sigmoid == local_max) & (pred_sigmoid > thresh)
+    peak_points = np.argwhere(peaks)
+    for r, c in peak_points:
+        cv2.circle(overlay, (c, r), 4, (0, 0, 255), 2)
 
-    for y in range(gt.shape[0]):
-        for x in range(gt.shape[1]):
-            if gt[y, x] > 0.5:
-                cv2.circle(overlay, (x, y), 3, (0, 255, 0), -1)
+    overlay_big = cv2.resize(overlay, (w * scale, h * scale), interpolation=cv2.INTER_NEAREST)
 
     overlay_path = os.path.join(output_dir, "bev_overlay.png")
-    cv2.imwrite(overlay_path, overlay)
+    cv2.imwrite(overlay_path, overlay_big)
     print(f"[OK] Saved: {overlay_path}")
 
     print(f"\n=== Prediction Stats ===")
