@@ -1,0 +1,3 @@
+## 2024-05-18 - [Optimize PyTorch grid sampling and perspective warping]
+**Learning:** PyTorch grid sampling and perspective warping can be significantly accelerated by replacing float64 coordinate arithmetic with float32 and leveraging grid_sample's native padding_mode by pushing invalid coordinates out-of-bounds.
+**Action:** Always prefer float32 coordinate arithmetic with torch.bmm for perspective warping. Out-of-bounds handling should leverage grid_sample's native padding_mode by pushing invalid coordinates out-of-bounds rather than using complex arithmetic penalties or slow mask-filling operations like torch.nan_to_num.
