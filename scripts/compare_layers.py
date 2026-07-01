@@ -243,6 +243,157 @@ def main():
     if not ok:
         all_pass = False
 
+    # ── E. 模型架构对比 ───────────────────────────────────────
+    banner("E. 模型架构对比 (参数量 & 层结构)")
+
+    # MVDet 模型结构
+    mvdet_model = mvdet["model"]
+    ours_model = ours["model"]
+
+    # img_classifier / img_head 对比
+    print("\n  --- img_classifier (MVDet) vs img_head (Ours) ---")
+    if hasattr(mvdet_model, 'img_classifier'):
+        for name, layer in mvdet_model.img_classifier.named_modules():
+            if isinstance(layer, (torch.nn.Conv2d, torch.nn.Linear)):
+                print(f"  MVDet img_classifier.{name}: {layer}")
+    if hasattr(ours_model, 'img_head'):
+        for name, layer in ours_model.img_head.named_modules():
+            if isinstance(layer, (torch.nn.Conv2d, torch.nn.Linear)):
+                print(f"  Ours  img_head.{name}: {layer}")
+
+    # map_classifier / bev_head 对比
+    print("\n  --- map_classifier (MVDet) vs bev_head (Ours) ---")
+    if hasattr(mvdet_model, 'map_classifier'):
+        for name, layer in mvdet_model.map_classifier.named_modules():
+            if isinstance(layer, (torch.nn.Conv2d, torch.nn.Linear)):
+                print(f"  MVDet map_classifier.{name}: {layer}")
+    if hasattr(ours_model, 'bev_head'):
+        for name, layer in ours_model.bev_head.named_modules():
+            if isinstance(layer, (torch.nn.Conv2d, torch.nn.Linear)):
+                print(f"  Ours  bev_head.{name}: {layer}")
+
+    # 参数量对比
+    def count_params(model):
+        return sum(p.numel() for p in model.parameters())
+    print(f"\n  MVDet 总参数量: {count_params(mvdet_model):,}")
+    print(f"  Ours  总参数量: {count_params(ours_model):,}")
+
+    # backbone 对比
+    print("\n  --- backbone 参数量 ---")
+    if hasattr(mvdet_model, 'base'):
+        mvdet_bb_params = count_params(mvdet_model.base)
+        print(f"  MVDet backbone (base): {mvdet_bb_params:,}")
+    if hasattr(ours_model, 'backbone'):
+        ours_bb_params = count_params(ours_model.backbone)
+        print(f"  Ours  backbone:        {ours_bb_params:,}")
+
+    # ── F. Forward pass 端到端对比 ──────────────────────────
+    banner("F. Forward pass 端到端对比 (随机初始化，对比输出量级)")
+
+    # 把两个模型都移到同一设备
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    mvdet_model = mvdet_model.to(device).eval()
+    ours_model = ours_model.to(device).eval()
+
+    # 手动将 MVDet 的非 buffer 属性移到对应设备
+    if hasattr(mvdet_model, 'proj_mats') and isinstance(mvdet_model.proj_mats, list):
+        mvdet_model.proj_mats = [m.to(device) for m in mvdet_model.proj_mats]
+    if hasattr(mvdet_model, 'coord_map') and isinstance(mvdet_model.coord_map, torch.Tensor):
+        mvdet_model.coord_map = mvdet_model.coord_map.to(device)
+
+    # 准备输入
+    mvdet_imgs = mvdet["imgs"].unsqueeze(0).to(device)  # (1, V, C, H, W) or (1, V*C, H, W)
+    ours_imgs = ours["x_views"].unsqueeze(0).to(device)  # (1, V, C, H, W)
+
+    with torch.no_grad():
+        # MVDet forward
+        try:
+            mvdet_out = mvdet_model(mvdet_imgs)
+            if isinstance(mvdet_out, (tuple, list)):
+                mvdet_map = mvdet_out[0]
+                mvdet_img_out = mvdet_out[1] if len(mvdet_out) > 1 else None
+            else:
+                mvdet_map = mvdet_out
+                mvdet_img_out = None
+            print(f"  MVDet map output: shape={tuple(mvdet_map.shape)}, "
+                  f"min={mvdet_map.min().item():.6f}, max={mvdet_map.max().item():.6f}, "
+                  f"mean={mvdet_map.mean().item():.6f}, std={mvdet_map.std().item():.6f}")
+            if mvdet_img_out is not None:
+                print(f"  MVDet img output: shape={tuple(mvdet_img_out.shape)}, "
+                      f"min={mvdet_img_out.min().item():.6f}, max={mvdet_img_out.max().item():.6f}")
+        except Exception as e:
+            print(f"  [ERROR] MVDet forward failed: {e}")
+            mvdet_map = None
+
+        # Ours forward
+        try:
+            ours_map, ours_img_out = ours_model(ours_imgs)
+            print(f"  Ours  map output: shape={tuple(ours_map.shape)}, "
+                  f"min={ours_map.min().item():.6f}, max={ours_map.max().item():.6f}, "
+                  f"mean={ours_map.mean().item():.6f}, std={ours_map.std().item():.6f}")
+            print(f"  Ours  img output: shape={tuple(ours_img_out.shape)}, "
+                  f"min={ours_img_out.min().item():.6f}, max={ours_img_out.max().item():.6f}")
+        except Exception as e:
+            print(f"  [ERROR] Ours forward failed: {e}")
+            ours_map = None
+
+    # shape 对比
+    if mvdet_map is not None and ours_map is not None:
+        if mvdet_map.shape == ours_map.shape:
+            print(f"\n  [PASS] map output shape 一致: {tuple(mvdet_map.shape)}")
+        else:
+            print(f"\n  [FAIL] map output shape 不一致: MVDet={tuple(mvdet_map.shape)} vs Ours={tuple(ours_map.shape)}")
+            all_pass = False
+    else:
+        print("\n  [FAIL] 因模型 forward 失败，无法对比 map output shape")
+        all_pass = False
+
+    # ── G. 逐阶段 feature 对比（使用 hook）────────────────────
+    banner("G. 逐阶段 feature stats (backbone → warp → concat → head)")
+
+    # MVDet 内部 feature 提取
+    print("\n  --- MVDet 内部 features ---")
+    try:
+        mvdet_model.eval()
+        with torch.no_grad():
+            # MVDet 的 forward 内部：
+            # 1) base(imgs) -> feat, 2) img_classifier(feat), 3) warp, 4) concat+coord, 5) map_classifier
+            B, _, C, H, W = mvdet_imgs.shape if mvdet_imgs.dim() == 5 else (1, 7, 3, 720, 1280)
+            
+            # 尝试提取中间特征
+            if hasattr(mvdet_model, 'base'):
+                # 取第一个视角的 backbone 输出
+                single_img = mvdet_imgs.reshape(-1, C, H, W)[:1]  # 第一个视角
+                bb_feat = mvdet_model.base(single_img)
+                print(f"  MVDet backbone output: shape={tuple(bb_feat.shape)}, "
+                      f"mean={bb_feat.mean().item():.6f}, std={bb_feat.std().item():.6f}")
+    except Exception as e:
+        print(f"  [WARN] MVDet feature extraction failed: {e}")
+
+    print("\n  --- Ours 内部 features ---")
+    try:
+        ours_model.eval()
+        with torch.no_grad():
+            single_img = ours_imgs[:, 0]  # (1, 3, H, W)
+            bb_feat = ours_model.backbone(single_img)
+            bb_feat_interp = torch.nn.functional.interpolate(
+                bb_feat, size=(ours_model.Hf, ours_model.Wf),
+                mode="bilinear", align_corners=False)
+            print(f"  Ours  backbone output: shape={tuple(bb_feat.shape)}, "
+                  f"mean={bb_feat.mean().item():.6f}, std={bb_feat.std().item():.6f}")
+            print(f"  Ours  backbone (interp): shape={tuple(bb_feat_interp.shape)}")
+
+            # Warp to BEV
+            from geometry import warp_perspective_torch
+            M = ours_model.proj_mats[0].unsqueeze(0)
+            bev_feat = warp_perspective_torch(bb_feat_interp, M,
+                                              dsize=(ours_model.Hb, ours_model.Wb))
+            print(f"  Ours  warp BEV (view 0): shape={tuple(bev_feat.shape)}, "
+                  f"mean={bev_feat.mean().item():.6f}, std={bev_feat.std().item():.6f}, "
+                  f"nonzero_ratio={((bev_feat.abs() > 1e-6).float().mean().item()):.4f}")
+    except Exception as e:
+        print(f"  [WARN] Ours feature extraction failed: {e}")
+
     # ── 总结 ────────────────────────────────────────────────
     banner("总结")
     if all_pass:
