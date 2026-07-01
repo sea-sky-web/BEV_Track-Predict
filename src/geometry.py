@@ -381,11 +381,17 @@ def create_grid_sampler(
         M_inv = torch.inverse(M)
         src_h = M_inv @ dst_h.to(dtype=dtype).expand(B, -1, -1)
         
-        x = src_h[:, 0] / src_h[:, 2].clamp_min(1e-6)
-        y = src_h[:, 1] / src_h[:, 2].clamp_min(1e-6)
+        z = src_h[:, 2]
+        invalid = ~(z > 1e-6)
+        z = torch.where(invalid, torch.ones_like(z), z)
+        x = src_h[:, 0] / z
+        y = src_h[:, 1] / z
         
         x_norm = 2.0 * (x / (Ws - 1.0)) - 1.0
         y_norm = 2.0 * (y / (Hs - 1.0)) - 1.0
+        
+        x_norm = torch.where(invalid, torch.full_like(x_norm, 2.0), x_norm)
+        y_norm = torch.where(invalid, torch.full_like(y_norm, 2.0), y_norm)
         
         grid = torch.stack([x_norm, y_norm], dim=-1).reshape(B, Hd, Wd, 2)
         
