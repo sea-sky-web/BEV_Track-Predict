@@ -237,15 +237,26 @@ if eval_out.exists():
 else:
     print("[WARN] eval_results.json not found", flush=True)
 
-# 可视化
+# 可视化（单帧 + 视频）
+viz_dir = str(REPO_DIR / "outputs/visualization")
 viz_cmd = [
     sys.executable, "scripts/visualize_prediction.py",
     "--model_path",  str(model_path),
     "--data_root",   str(data_root),
-    "--output",      str(REPO_DIR / "outputs/visualization"),
+    "--output",      viz_dir,
     "--frame",       "0",
 ]
 run(viz_cmd, cwd=str(REPO_DIR), check=False)
+
+video_cmd = [
+    sys.executable, "scripts/visualize_prediction.py",
+    "--model_path",  str(model_path),
+    "--data_root",   str(data_root),
+    "--output",      viz_dir,
+    "--video",
+    "--fps",         "5",
+]
+run(video_cmd, cwd=str(REPO_DIR), check=False)
 
 # --- Base64 export key files to stdout (reliable, doesn't depend on colab download) ---
 import base64
@@ -253,6 +264,7 @@ files_to_export = [
     REPO_DIR / "outputs/eval_results.json",
     REPO_DIR / "outputs/visualization/bev_prediction.png",
     REPO_DIR / "outputs/visualization/bev_overlay.png",
+    REPO_DIR / "outputs/visualization/bev_prediction.mp4",
 ]
 for fp in files_to_export:
     if fp.exists():
