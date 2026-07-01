@@ -295,6 +295,12 @@ def main():
     mvdet_model = mvdet_model.to(device).eval()
     ours_model = ours_model.to(device).eval()
 
+    # 手动将 MVDet 的非 buffer 属性移到对应设备
+    if hasattr(mvdet_model, 'proj_mats') and isinstance(mvdet_model.proj_mats, list):
+        mvdet_model.proj_mats = [m.to(device) for m in mvdet_model.proj_mats]
+    if hasattr(mvdet_model, 'coord_map') and isinstance(mvdet_model.coord_map, torch.Tensor):
+        mvdet_model.coord_map = mvdet_model.coord_map.to(device)
+
     # 准备输入
     mvdet_imgs = mvdet["imgs"].unsqueeze(0).to(device)  # (1, V, C, H, W) or (1, V*C, H, W)
     ours_imgs = ours["x_views"].unsqueeze(0).to(device)  # (1, V, C, H, W)
@@ -338,6 +344,9 @@ def main():
         else:
             print(f"\n  [FAIL] map output shape 不一致: MVDet={tuple(mvdet_map.shape)} vs Ours={tuple(ours_map.shape)}")
             all_pass = False
+    else:
+        print("\n  [FAIL] 因模型 forward 失败，无法对比 map output shape")
+        all_pass = False
 
     # ── G. 逐阶段 feature 对比（使用 hook）────────────────────
     banner("G. 逐阶段 feature stats (backbone → warp → concat → head)")
