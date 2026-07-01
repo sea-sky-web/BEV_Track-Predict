@@ -186,24 +186,28 @@ def visualize_video(model, ds, dev, output_dir, max_frames=-1, fps=5):
     """生成所有帧的 BEV 预测视频。"""
     os.makedirs(output_dir, exist_ok=True)
     n_frames = len(ds) if max_frames < 0 else min(max_frames, len(ds))
+    if n_frames <= 0:
+        print("[WARN] No frames to render for video.")
+        return None
+
     print(f"[VIDEO] Rendering {n_frames} frames at {fps} fps ...")
-
-    # 先渲染一帧确定尺寸
-    frame0, _ = render_frame(model, ds, dev, 0)
-    fh, fw = frame0.shape[:2]
-
     video_path = os.path.join(output_dir, "bev_prediction.mp4")
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(video_path, fourcc, fps, (fw, fh))
-    writer.write(frame0)
+    writer = None
 
-    for i in range(1, n_frames):
-        frame, info = render_frame(model, ds, dev, i)
-        writer.write(frame)
-        if (i + 1) % 50 == 0 or i == n_frames - 1:
-            print(f"  [{i+1}/{n_frames}] GT={info['n_gt']} Det={info['n_det']} logit_max={info['logit_max']:.3f}")
+    try:
+        for i in range(n_frames):
+            frame, info = render_frame(model, ds, dev, i)
+            if writer is None:
+                fh, fw = frame.shape[:2]
+                writer = cv2.VideoWriter(video_path, fourcc, fps, (fw, fh))
+            writer.write(frame)
+            if (i + 1) % 50 == 0 or i == n_frames - 1:
+                print(f"  [{i+1}/{n_frames}] GT={info['n_gt']} Det={info['n_det']} logit_max={info['logit_max']:.3f}")
+    finally:
+        if writer is not None:
+            writer.release()
 
-    writer.release()
     size_mb = os.path.getsize(video_path) / 1e6
     print(f"[OK] Video saved: {video_path} ({size_mb:.1f} MB, {n_frames} frames)")
     return video_path
