@@ -120,6 +120,13 @@ jobs:
             cat scripts/compare_layers.py
           } | colab exec -s bev-train --timeout 600
 
+      # 读取 MVDet 官方训练配置
+      - name: Read MVDet training config
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          cat scripts/read_mvdet_config.py | colab exec -s bev-train --timeout 300
+
       # 可选：运行 MVDet 训练
       - name: Run MVDet training
         if: inputs.skip_train != 'true'
