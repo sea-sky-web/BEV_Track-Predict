@@ -105,7 +105,7 @@ jobs:
       # colab exec --timeout is inactivity timeout. Set high (7200s=2h) so long training
       # doesn't disconnect. The step-level timeout-minutes=240 is the hard wall.
       # continue-on-error lets download/eval steps run even if training times out.
-      - name: Run training
+      - name: Run training and download results
         timeout-minutes: 240
         continue-on-error: true
         run: |
@@ -113,83 +113,13 @@ jobs:
             echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}']"
             cat scripts/colab_train.py
           } | colab exec -s bev-train --timeout 7200
-
-      - name: Run evaluation + visualization (single session)
-        if: always()
-        timeout-minutes: 25
-        continue-on-error: true
-        run: |
-          colab exec -s bev-train --timeout 1200 <<'EVALVIZ'
-          import subprocess, sys, json, pathlib
-
-          # --- Evaluation ---
-          eval_cmd = (
-              "cd /content/BEV_Track-Predict && "
-              "python3 src/evaluate_main.py "
-              "--data_root /content/BEV_Track-Predict/wildtrack "
-              "--model_path outputs/train_multicam_mvdet_style_v3/model_final.pth "
-              "--device cuda "
-              "--report_detection "
-              "--metrics_out outputs/eval_results.json "
-              "--views 0,1,2,3,4,5,6 "
-              "--fusion_mode concat "
-              "--backbone resnet18"
-          )
-          print(f">>> {eval_cmd}", flush=True)
-          ret = subprocess.call(eval_cmd, shell=True)
-          print(f"\n[EVAL] exit code: {ret}", flush=True)
-
-          # --- Inline eval results (captured by GA logs even if download fails) ---
-          p = pathlib.Path('/content/BEV_Track-Predict/outputs/eval_results.json')
-          if p.exists():
-              r = json.loads(p.read_text())
-              print('\n=== EVAL RESULTS (inline) ===')
-              for k in ['det_moda','det_modp','det_precision','det_recall','det_f1',
-                        'det_best_threshold','det_moda_tp','det_moda_fp','det_moda_fn']:
-                  print(f'{k}: {r.get(k, "N/A")}')
-              print('=== END EVAL RESULTS ===', flush=True)
-          else:
-              print('[WARN] eval_results.json not found after eval', flush=True)
-
-          # --- Visualization (same session, before it dies) ---
-          viz_cmd = (
-              "cd /content/BEV_Track-Predict && "
-              "python3 scripts/visualize_prediction.py "
-              "--model_path outputs/train_multicam_mvdet_style_v3/model_final.pth "
-              "--data_root /content/BEV_Track-Predict/wildtrack "
-              "--output outputs/visualization "
-              "--frame 0"
-          )
-          print(f"\n>>> {viz_cmd}", flush=True)
-          ret2 = subprocess.call(viz_cmd, shell=True)
-          print(f"[VIZ] exit code: {ret2}", flush=True)
-
-          # --- Base64 encode key files to stdout for reliable extraction ---
-          import base64
-          files_to_export = [
-              '/content/BEV_Track-Predict/outputs/eval_results.json',
-              '/content/BEV_Track-Predict/outputs/visualization/bev_prediction.png',
-              '/content/BEV_Track-Predict/outputs/visualization/bev_overlay.png',
-          ]
-          for fpath in files_to_export:
-              fp = pathlib.Path(fpath)
-              if fp.exists():
-                  data = base64.b64encode(fp.read_bytes()).decode()
-                  print(f"\n===B64_START {fp.name}===", flush=True)
-                  for i in range(0, len(data), 76):
-                      print(data[i:i+76], flush=True)
-                  print(f"===B64_END {fp.name}===", flush=True)
-              else:
-                  print(f"[WARN] {fp.name} not found, skip base64 export", flush=True)
-          EVALVIZ
-
-      - name: Download checkpoint and results
-        if: always()
-        run: |
+          # Download immediately after exec while session is still alive
           REMOTE="/content/BEV_Track-Predict/outputs"
-          colab download -s bev-train "$REMOTE/eval_results.json" ./eval_results.json || true
-          colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/model_final.pth" ./model_final.pth || true
-          colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/metrics.csv" ./metrics.csv || true
+          colab download -s bev-train "$REMOTE/eval_results.json"                                     ./eval_results.json   || true
+          colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/model_final.pth"         ./model_final.pth     || true
+          colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/metrics.csv"             ./metrics.csv         || true
+          colab download -s bev-train "$REMOTE/visualization/bev_prediction.png"                      ./bev_prediction.png  || true
+          colab download -s bev-train "$REMOTE/visualization/bev_overlay.png"                         ./bev_overlay.png     || true
 
       - name: Print evaluation summary
         if: always()
@@ -201,10 +131,7 @@ jobs:
           print('=' * 50)
           print('EVALUATION RESULTS')
           print('=' * 50)
-          for k in ['loss','pos_mse','aux_pos_mse']:
-              print(f'{k:20s}: {r.get(k, \"N/A\"):.6f}' if isinstance(r.get(k), (int,float)) else f'{k:20s}: N/A')
           if 'det_moda' in r:
-              print('-' * 50)
               print(f'{\"MODA\":20s}: {r[\"det_moda\"]:.4f}')
               print(f'{\"MODP\":20s}: {r[\"det_modp\"]:.4f}')
               print(f'{\"Precision\":20s}: {r[\"det_precision\"]:.4f}')
@@ -217,34 +144,6 @@ jobs:
           else
             echo "[WARN] eval_results.json not found — evaluation may have failed"
           fi
-
-      - name: Download visualization
-        if: always()
-        run: |
-          VIZ_REMOTE="/content/BEV_Track-Predict/outputs/visualization"
-          colab download -s bev-train "$VIZ_REMOTE/bev_prediction.png" ./bev_prediction.png || true
-          colab download -s bev-train "$VIZ_REMOTE/bev_overlay.png"    ./bev_overlay.png    || true
-
-      - name: Extract base64 files from eval log (fallback)
-        if: always()
-        run: |
-          # If colab download failed, extract files from the eval step's stdout
-          # The eval step prints ===B64_START filename=== ... ===B64_END filename===
-          LOG=$(gh run view ${{ github.run_id }} --log 2>/dev/null || true)
-          for fname in eval_results.json bev_prediction.png bev_overlay.png; do
-            if [ ! -f "$fname" ] || [ ! -s "$fname" ]; then
-              echo "Extracting $fname from log (base64 fallback)..."
-              echo "$LOG" | sed -n "/===B64_START ${fname}===/,/===B64_END ${fname}===/p" | grep -v "===B64_" | sed 's/^.*Z //' | tr -d '\r\n ' | base64 -d > "$fname" 2>/dev/null || true
-              if [ -s "$fname" ]; then
-                echo "[OK] Extracted $fname ($(wc -c < "$fname") bytes)"
-              else
-                rm -f "$fname"
-                echo "[WARN] Could not extract $fname"
-              fi
-            fi
-          done
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - name: Upload artifacts
         if: always()
