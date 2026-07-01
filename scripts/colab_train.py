@@ -220,6 +220,8 @@ eval_cmd = [
     "--views",           "0,1,2,3,4,5,6",
     "--fusion_mode",     "concat",
     "--backbone",        "resnet18",
+    "--frame_start",     "1800",   # MVDet test split: last 10% (frames 1800-1999)
+    "--max_frames",      "200",
     "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50",
 ]
 print("命令：", " ".join(eval_cmd))
@@ -237,7 +239,7 @@ if eval_out.exists():
 else:
     print("[WARN] eval_results.json not found", flush=True)
 
-# 可视化（单帧 + 视频）
+# 可视化（单帧）
 viz_dir = str(REPO_DIR / "outputs/visualization")
 viz_cmd = [
     sys.executable, "scripts/visualize_prediction.py",
@@ -247,33 +249,5 @@ viz_cmd = [
     "--frame",       "0",
 ]
 run(viz_cmd, cwd=str(REPO_DIR), check=False)
-
-video_cmd = [
-    sys.executable, "scripts/visualize_prediction.py",
-    "--model_path",  str(model_path),
-    "--data_root",   str(data_root),
-    "--output",      viz_dir,
-    "--video",
-    "--fps",         "5",
-]
-run(video_cmd, cwd=str(REPO_DIR), check=False)
-
-# --- Base64 export key files to stdout (reliable, doesn't depend on colab download) ---
-import base64
-files_to_export = [
-    REPO_DIR / "outputs/eval_results.json",
-    REPO_DIR / "outputs/visualization/bev_prediction.png",
-    REPO_DIR / "outputs/visualization/bev_overlay.png",
-    REPO_DIR / "outputs/visualization/bev_prediction.mp4",
-]
-for fp in files_to_export:
-    if fp.exists():
-        data = base64.b64encode(fp.read_bytes()).decode()
-        print(f"\n===B64_START {fp.name}===", flush=True)
-        for i in range(0, len(data), 76):
-            print(data[i:i+76], flush=True)
-        print(f"===B64_END {fp.name}===", flush=True)
-    else:
-        print(f"[WARN] {fp.name} not found, skip export", flush=True)
 
 print("[OK] 全部完成", flush=True)

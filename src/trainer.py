@@ -233,7 +233,6 @@ class MVDetTrainer:
                 scale_before = self.scaler.get_scale()
                 self.scaler.scale(loss).backward()
                 self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 # 仅在 optimizer 真正更新后推进 LR
@@ -241,7 +240,6 @@ class MVDetTrainer:
                     self.scheduler.step()
             else:
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
                 self.scheduler.step()
             
