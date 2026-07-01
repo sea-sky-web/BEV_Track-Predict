@@ -302,12 +302,6 @@ def warp_perspective_torch(
     y_norm = torch.where(invalid, torch.full_like(y_norm, 2.0), y_norm)
 
     valid = ~invalid
-    # 恢复 NaN 和 Inf 检查以保证 float32 计算的稳定性
-    valid = valid & torch.isfinite(x) & torch.isfinite(y)
-
-    x_norm = torch.nan_to_num(x_norm, nan=2.0, posinf=2.0, neginf=-2.0)
-    y_norm = torch.nan_to_num(y_norm, nan=2.0, posinf=2.0, neginf=-2.0)
-
     in_bounds = valid & (
         x >= 0.0) & (
         x <= float(
@@ -317,7 +311,6 @@ def warp_perspective_torch(
                     y <= float(
                         Hs -
                         1))
-
     if min_valid_ratio > 0.0:
         valid_ratio = float(in_bounds.float().mean().item())
         if valid_ratio < min_valid_ratio:

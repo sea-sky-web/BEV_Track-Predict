@@ -1,0 +1,16 @@
+--- src/geometry.py
++++ src/geometry.py
+@@ -300,10 +300,12 @@
+     x_norm = torch.where(invalid, torch.full_like(x_norm, 2.0), x_norm)
+     y_norm = torch.where(invalid, torch.full_like(y_norm, 2.0), y_norm)
+
++    # 恢复 NaN 和 Inf 检查以保证 float32 计算的稳定性
++    valid = valid & torch.isfinite(x) & torch.isfinite(y)
+     in_bounds = valid & (x >= 0.0) & (x <= float(Ws - 1)) & (y >= 0.0) & (y <= float(Hs - 1))
+     if min_valid_ratio > 0.0:
+         valid_ratio = float(in_bounds.float().mean().item())
+         if valid_ratio < min_valid_ratio:
+             raise ValueError(
+-                f"warp valid ratio {valid_ratio:.6f} below required min_valid_ratio={min_valid_ratio:.6f}"
++                f"warp valid ratio {valid_ratio:.6f} below required min_valid_ratio={min_valid_ratio:.6f}"
+             )

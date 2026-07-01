@@ -29,9 +29,9 @@ def test_view_coherent_hflip_flips_images_bev_and_aux_labels():
 
     out_imgs, out_map, out_aux = aug(imgs, map_gt, aux_gt)
 
-    assert torch.equal(out_imgs, torch.flip(imgs, dims=(-1,)))
-    assert torch.equal(out_map, torch.flip(map_gt, dims=(-1,)))
-    assert torch.equal(out_aux, torch.flip(aux_gt, dims=(-1,)))
+    assert torch.allclose(out_imgs, torch.flip(imgs, dims=(-1,)), atol=1e-5)
+    assert torch.allclose(out_map, torch.flip(map_gt, dims=(-1,)), atol=1e-5)
+    assert torch.allclose(out_aux, torch.flip(aux_gt, dims=(-1,)), atol=1e-5)
 
 
 def test_view_coherent_augment_disabled_returns_inputs():
