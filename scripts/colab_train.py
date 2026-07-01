@@ -246,4 +246,22 @@ viz_cmd = [
     "--frame",       "0",
 ]
 run(viz_cmd, cwd=str(REPO_DIR), check=False)
+
+# --- Base64 export key files to stdout (reliable, doesn't depend on colab download) ---
+import base64
+files_to_export = [
+    REPO_DIR / "outputs/eval_results.json",
+    REPO_DIR / "outputs/visualization/bev_prediction.png",
+    REPO_DIR / "outputs/visualization/bev_overlay.png",
+]
+for fp in files_to_export:
+    if fp.exists():
+        data = base64.b64encode(fp.read_bytes()).decode()
+        print(f"\n===B64_START {fp.name}===", flush=True)
+        for i in range(0, len(data), 76):
+            print(data[i:i+76], flush=True)
+        print(f"===B64_END {fp.name}===", flush=True)
+    else:
+        print(f"[WARN] {fp.name} not found, skip export", flush=True)
+
 print("[OK] 全部完成", flush=True)

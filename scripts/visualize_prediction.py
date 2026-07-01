@@ -119,17 +119,18 @@ def visualize(model_path, data_root, output_dir, device="cuda", frame_idx=0,
 
     pred_sigmoid = 1.0 / (1.0 + np.exp(-np.clip(pred, -20, 20)))
 
-    # --- Normalize for visibility ---
-    # GT: binary dots are tiny on 120x360, dilate to make visible
+    # --- Use raw logit for visualization (sigmoid compresses range too much) ---
     gt_binary = (gt > 0.5).astype(np.uint8)
     gt_dilated = cv2.dilate(gt_binary, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
     gt_vis = (gt_dilated * 255).astype(np.uint8)
 
-    # Pred: normalize to full [0,255] range for contrast
-    pred_norm = pred_sigmoid.copy()
-    pmax = pred_norm.max()
+    # Normalize raw logit to [0, 255] — clip negatives to 0, scale by max
+    pred_clipped = np.clip(pred, 0, None)
+    pmax = pred_clipped.max()
     if pmax > 0:
-        pred_norm = pred_norm / pmax
+        pred_norm = pred_clipped / pmax
+    else:
+        pred_norm = pred_clipped
     pred_vis = (pred_norm * 255).clip(0, 255).astype(np.uint8)
 
     pred_color = cv2.applyColorMap(pred_vis, cv2.COLORMAP_JET)
@@ -161,16 +162,13 @@ def visualize(model_path, data_root, output_dir, device="cuda", frame_idx=0,
 
     # --- Overlay: prediction heatmap + GT circles ---
     overlay = pred_color.copy()
-    thresh = 0.3
     # Mark GT positions with green circles
     for r, c in gt_points:
         cv2.circle(overlay, (c, r), 5, (0, 255, 0), 2)
-    # Mark detections (pred > thresh) with red circles
-    det_points = np.argwhere(pred_sigmoid > thresh)
-    # Use NMS-style: find local maxima
+    # Mark detections: local maxima of raw logit > 0.3
     from scipy.ndimage import maximum_filter
-    local_max = maximum_filter(pred_sigmoid, size=5)
-    peaks = (pred_sigmoid == local_max) & (pred_sigmoid > thresh)
+    local_max = maximum_filter(pred, size=5)
+    peaks = (pred == local_max) & (pred > 0.3)
     peak_points = np.argwhere(peaks)
     for r, c in peak_points:
         cv2.circle(overlay, (c, r), 4, (0, 0, 255), 2)
