@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """在 Colab 上读取 MVDet 官方代码的训练配置，不需要 GPU。"""
-import subprocess, sys, os
+import os
+import subprocess
+import sys
 
 # Clone MVDet if not present
 mvdet_dir = "/content/MVDet"
@@ -15,7 +17,7 @@ print("=" * 60)
 print("\n--- main.py argparse defaults ---")
 main_py = os.path.join(mvdet_dir, "main.py")
 if os.path.exists(main_py):
-    with open(main_py) as f:
+    with open(main_py, encoding="utf-8") as f:
         for line in f:
             if any(k in line.lower() for k in ["add_argument", "lr", "epoch", "momentum", "weight_decay",
                                                   "batch", "augment", "flip", "scheduler", "split",
@@ -30,7 +32,7 @@ for fname in ["multiview_detector/trainer.py", "multiview_detector/models/traine
     fpath = os.path.join(mvdet_dir, fname)
     if os.path.exists(fpath):
         print(f"\n[FILE] {fname}")
-        with open(fpath) as f:
+        with open(fpath, encoding="utf-8") as f:
             content = f.read()
             print(content)
         break
@@ -42,7 +44,7 @@ for fname in ["multiview_detector/datasets/frameDataset.py",
     fpath = os.path.join(mvdet_dir, fname)
     if os.path.exists(fpath):
         print(f"\n[FILE] {fname}")
-        with open(fpath) as f:
+        with open(fpath, encoding="utf-8") as f:
             for line in f:
                 if any(k in line.lower() for k in ["train", "test", "split", "frame", "augment",
                                                       "flip", "transform", "ratio", "len(", "__len__"]):
@@ -51,10 +53,11 @@ for fname in ["multiview_detector/datasets/frameDataset.py",
 # 4. augmentation — any transforms
 print("\n--- augmentation / transforms ---")
 for root, dirs, files in os.walk(mvdet_dir):
+    dirs[:] = [d for d in dirs if d not in {".git", "data", "logs", "outputs"}]
     for f in files:
         if f.endswith(".py"):
             fpath = os.path.join(root, f)
-            with open(fpath) as fh:
+            with open(fpath, encoding="utf-8") as fh:
                 for i, line in enumerate(fh, 1):
                     if any(k in line.lower() for k in ["randomhorizontalflip", "colorjitter",
                                                          "randomcrop", "augment"]):
