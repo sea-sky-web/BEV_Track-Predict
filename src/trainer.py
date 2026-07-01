@@ -232,7 +232,6 @@ class MVDetTrainer:
             if self.amp_enabled:
                 scale_before = self.scaler.get_scale()
                 self.scaler.scale(loss).backward()
-                self.scaler.unscale_(self.optimizer)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 # 仅在 optimizer 真正更新后推进 LR
