@@ -50,7 +50,7 @@ parser.add_argument("--gdrive_id", default=GDRIVE_FOLDER_ID,
 parser.add_argument("--data_root", default=None,
                     help="已解压的数据集路径（跳过下载）")
 parser.add_argument("--epochs", type=int, default=10)
-parser.add_argument("--bev_pos_weight", type=float, default=10.0,
+parser.add_argument("--bev_pos_weight", type=float, default=1.0,
                     help="BEV 正样本损失权重")
 parser.add_argument("--device", default="cuda")
 parser.add_argument("--max_frames", type=int, default=100,
