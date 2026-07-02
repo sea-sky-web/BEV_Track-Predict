@@ -63,7 +63,7 @@ DEFAULT_PERSON_H = 1.7                 # 人体高度（米）
 
 # 损失函数
 DEFAULT_ALPHA = 1.0                    # 图像损失权重
-DEFAULT_BEV_POS_WEIGHT = 10.0           # BEV 正样本损失权重（正负比 ~20:1，取保守值）
+DEFAULT_BEV_POS_WEIGHT = 1.0            # 标准 MSE（与 MVDet 一致）
 DEFAULT_BEV_NEG_WEIGHT = 1.0            # BEV 负样本损失权重
 DEFAULT_MAP_KSIZE = 41                 # BEV 热图高斯核大小（MVDet: 41）
 DEFAULT_MAP_SIGMA = 2.2361             # MVDet: cov=I*5.0 → variance=5.0 → sigma=sqrt(5)≈2.2361
