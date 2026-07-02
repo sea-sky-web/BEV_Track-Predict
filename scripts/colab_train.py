@@ -174,7 +174,6 @@ if args.epochs > 0:
     sys.executable, "scripts/train_main.py",
     "--data_root",              str(data_root),
     "--views",                  "0,1,2,3,4,5,6",
-    "--max_frames",             str(args.max_frames),
     "--epochs",                 str(args.epochs),
     "--batch",                  "1",
     "--pretrained",             "true",
@@ -187,7 +186,7 @@ if args.epochs > 0:
     "--optimizer",              "sgd",
     "--scheduler",              "onecycle",
     "--lr_init",                "0.1",
-    "--max_frames",             str(min(args.max_frames, 1800) if args.max_frames > 0 else 1800),
+    "--max_frames",             str(min(args.max_frames, 360) if args.max_frames > 0 else 360),
     "--weight_decay",           "0.0005",
     "--freeze_backbone_epochs", "0",
     "--bev_pos_weight",         str(args.bev_pos_weight),
@@ -221,8 +220,8 @@ eval_cmd = [
     "--views",           "0,1,2,3,4,5,6",
     "--fusion_mode",     "concat",
     "--backbone",        "resnet18",
-    "--frame_start",     "1800",   # MVDet test split: last 10% (frames 1800-1999)
-    "--max_frames",      "200",
+    "--frame_start",     "360",    # MVDet test split: last 10% (frames 360-399 of 400 annotations)
+    "--max_frames",      "40",
     "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50",
 ]
 print("命令：", " ".join(eval_cmd))
