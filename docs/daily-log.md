@@ -43,7 +43,7 @@
 - Run 28560562597（修复后）：MODA=0.441（见 07-06 分析）
 
 ### 修复
-- `scripts/colab_train.py`: frame_start 1800→360, max_frames 200→40, 训练帧上限 1800→360
+- [`scripts/colab_train.py`](../scripts/colab_train.py): frame_start 1800→360, max_frames 200→40, 训练帧上限 1800→360
 - 移除重复的 `--max_frames` 参数（CR 发现）
 
 ---
@@ -71,7 +71,7 @@
 | #69 | bev_pos_weight 10→1 |
 
 ### 错误记录
-- 详见 `ai_runs/20260701_session_errors/ai_context.md`
+- 详见 [`ai_runs/20260701_session_errors/ai_context.md`](../ai_runs/20260701_session_errors/ai_context.md)
 
 ---
 
@@ -96,7 +96,7 @@
 
 ### 重大进展：发现并修复 3 个根因 bug
 
-通过 `scripts/compare_layers.py` 与 MVDet 官方逐层对比，发现 2.5 个月 MODA=0 的根因：
+通过 [`scripts/compare_layers.py`](../scripts/compare_layers.py) 与 MVDet 官方逐层对比，发现 2.5 个月 MODA=0 的根因：
 
 | Bug | 修复 | 影响 |
 |-----|------|------|
@@ -104,7 +104,7 @@
 | GT 坐标映射 | `ix=pos%480, iy=pos//480`, `map_gt[0,ix,iy]` | GT 标签位置错误 |
 | Gaussian sigma | MAP_SIGMA 5.0→2.236（√5） | 核宽 5 倍于正确值 |
 
-详见 `ai_runs/20260629_180955/ai_context.md`
+详见 [`ai_runs/20260629_180955/ai_context.md`](../ai_runs/20260629_180955/ai_context.md)
 
 ---
 
