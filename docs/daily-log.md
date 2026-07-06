@@ -54,6 +54,18 @@ workflow 直接传参覆盖代码默认值 → 训练实际用 100 帧 + 10 倍�
 - [ ] 触发新训练 run 验证 MODA 提升
 - [ ] 若 MODA 仍不足，考虑增加 epoch（10→20）或输入分辨率（720×1280→1080×1920）
 
+### NMS 半径 bug（07-06 晚间追加）
+
+**根因确认**：`evaluate_main.py` 的 `det_min_distance=20.0` 直接用在 REDUCED grid 上，而 MVDet 的 `nms(dist_thres=20)` 用在 FULL grid 上。
+
+| | MVDet | 我们 |
+|---|---|---|
+| NMS 参数 | 20 | 20 |
+| 坐标系 | Full grid (2.5cm/格) | Reduced grid (10cm/格) |
+| 实际抑制半径 | **0.5m** | **2.0m（4× 过大）** |
+
+修复：`det_min_distance` 20.0 → 5.0。此 bug 直接解释 Recall=0.456（FN=503/952）。
+
 ---
 
 ## 2026-07-02
@@ -142,4 +154,5 @@ workflow 直接传参覆盖代码默认值 → 训练实际用 100 帧 + 10 倍�
 | 07-01 | 配置全面对齐 MVDet | — |
 | 07-02 | 首次无数据泄露 eval | 0.441 |
 | 07-06 | 深入排查：发现 workflow 默认值、AMP、dilation 3 个遗漏问题 | — |
+| 07-06 | **根因确认：NMS 半径 4× 过大**（20 reduced cells=2.0m，应为 5 cells=0.5m） | — |
 | **目标** | **超越 MVDet 基线** | **≥ 0.882** |
