@@ -12,12 +12,12 @@ on:
         default: 'T4'
         required: false
       bev_pos_weight:
-        description: 'BEV 正样本损失权重（抬高行人响应）'
-        default: '10.0'
+        description: 'BEV 正样本损失权重（MVDet 标准 MSE = 1.0）'
+        default: '1.0'
         required: false
       max_frames:
-        description: '训练帧数上限（更多帧 = 更多数据 = 更好泛化）'
-        default: '100'
+        description: '训练帧数上限（MVDet train split = 360）'
+        default: '360'
         required: false
       checkpoint_run:
         description: 'eval-only: 从指定 GA run ID 下载 checkpoint（配合 epochs=0）'

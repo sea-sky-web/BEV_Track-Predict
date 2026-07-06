@@ -53,8 +53,8 @@ parser.add_argument("--epochs", type=int, default=10)
 parser.add_argument("--bev_pos_weight", type=float, default=1.0,
                     help="BEV 正样本损失权重")
 parser.add_argument("--device", default="cuda")
-parser.add_argument("--max_frames", type=int, default=100,
-                    help="Max training frames (more data = better generalization)")
+parser.add_argument("--max_frames", type=int, default=360,
+                    help="Max training frames (MVDet train split = 360)")
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
@@ -179,9 +179,7 @@ if args.epochs > 0:
     "--pretrained",             "true",
     "--backbone",               "resnet18",
     "--fusion_mode",            "concat",
-    "--augment",                "true",
-    "--augment_hflip_prob",     "0.0",
-    "--augment_color_jitter",   "0.2,0.2,0.2,0.05",
+    "--augment",                "false",
     "--alpha",                  "1.0",
     "--optimizer",              "sgd",
     "--scheduler",              "onecycle",
@@ -192,7 +190,6 @@ if args.epochs > 0:
     "--bev_pos_weight",         str(args.bev_pos_weight),
     "--device",                 args.device,
     "--log_every",              "20",
-    "--amp",  # concat 融合 7 视角内存较大，AMP 节省约一半显存
 ]
 
     print("命令：", " ".join(train_cmd))

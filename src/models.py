@@ -23,17 +23,17 @@ def normalize_fusion_mode(fusion_mode: str) -> str:
     return fusion_mode
 
 
-def _dilate_basic_resnet_layer(layer: nn.Sequential, dilation: int) -> None:
-    """Convert a torchvision ResNet-18 layer to stride-1 dilated blocks.
+def _undilate_basic_resnet_layer(layer: nn.Sequential) -> None:
+    """Convert a torchvision ResNet-18 layer to stride-1 WITHOUT dilation.
 
-    Only conv1 gets dilation (matching MVDet's BasicBlock implementation).
+    MVDet's old torchvision ignores the dilation param in BasicBlock entirely.
+    The only change is setting stride=1 for both conv and downsample, keeping
+    the pretrained weights compatible with their original contiguous 3×3 pattern.
     """
     for block in layer:
         if hasattr(block, "conv1"):
             if block.conv1.stride != (1, 1):
                 block.conv1.stride = (1, 1)
-            block.conv1.dilation = (dilation, dilation)
-            block.conv1.padding = (dilation, dilation)
         if getattr(block, "downsample", None) is not None:
             conv = block.downsample[0]
             if hasattr(conv, "stride") and conv.stride != (1, 1):
@@ -55,8 +55,8 @@ class ResNet18Stride8Trunk(nn.Module):
 
         # ResNet-18 uses BasicBlock, so torchvision's replace_stride_with_dilation
         # path is not available. Patch layer3/layer4 after construction.
-        _dilate_basic_resnet_layer(m.layer3, dilation=2)
-        _dilate_basic_resnet_layer(m.layer4, dilation=4)
+        _undilate_basic_resnet_layer(m.layer3)
+        _undilate_basic_resnet_layer(m.layer4)
 
         self.stem = nn.Sequential(m.conv1, m.bn1, m.relu, m.maxpool)
         self.layer1 = m.layer1
