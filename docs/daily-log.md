@@ -10,7 +10,34 @@
 
 ### 进展
 - 会话恢复，建立规范化每日记录体系
-- 确认最新训练结果（run 28560562597）
+- 深入排查 MODA 0.44 vs 0.88 差距根因
+- 发现 **3 个被遗漏的致命问题** + 2 个中等问题
+
+### 深入排查发现
+
+#### P0（致命）：Workflow 默认值从未与代码同步
+| 参数 | workflow 默认值 | 代码默认值 | MVDet 值 |
+|------|:-----------:|:-------:|:------:|
+| max_frames | **100** | -1(全部) | 360 |
+| bev_pos_weight | **10.0** | 1.0 | 1.0 |
+
+workflow 直接传参覆盖代码默认值 → 训练实际用 100 帧 + 10 倍正样本权重。
+
+#### P1：AMP 混合精度 + Color Jitter
+- `colab_train.py` 硬编码 `--amp`：MVDet 不用，float16 精度不足 + OneCycleLR 失步
+- `--augment true` + color_jitter(0.2,0.2,0.2,0.05)：MVDet 无任何增强
+
+#### P2：Backbone dilation 实现不一致
+- 我们对 BasicBlock conv1 强制加 dilation=2/4
+- MVDet 旧版 torchvision BasicBlock 忽略 dilation，只改 stride=1
+- dilation 破坏 ImageNet 预训练权重的 3×3 连续感受野
+
+### 修复（PR fix/align-training-config-p0p1p2）
+| 文件 | 修改 |
+|------|------|
+| `.github/workflows/colab-train.yml` | max_frames 100→360, bev_pos_weight 10.0→1.0 |
+| `scripts/colab_train.py` | max_frames 默认 100→360, 移除 --amp, augment true→false |
+| `src/models.py` | 移除 dilation, 只保留 stride=1（_undilate_basic_resnet_layer） |
 
 ### 实验结果
 | Run ID | 配置 | MODA | Precision | Recall | F1 | MODP |
@@ -18,17 +45,14 @@
 | 28560562597 | lr=0.1, 无clip, pos_w=1.0, 360帧训练, eval后40帧 | **0.441** | 0.900 | 0.452 | 0.601 | 0.753 |
 
 ### 分析
-- 对比之前 MODA=0.57（run 28418202813），下降原因：
-  1. 之前训练用了全部 1800 帧（含测试帧，数据泄露），现在正确使用 360 帧
-  2. pos_weight 10→1 降低了正样本梯度权重，Recall 从 0.567 下降到 0.452
-  3. SNR 仅 0.381，模型可能欠拟合
-- MVDet 官方同样用 360 帧训练达到 0.882，说明数据量不是瓶颈
-- 所有关键配置已对齐 MVDet，差距根因待排查
+- MODA 0.44 的主因大概率是 workflow 默认值（100 帧 + pos_w=10.0）
+- AMP、color jitter、backbone dilation 为次要因素
+- 修复后需要重新训练验证
 
 ### 待解决
-- [ ] MODA 0.44 vs 0.88 差距根因排查
-- [ ] 考虑增加 epoch 数（10→20/30）
-- [ ] 检查两个小差异影响：color jitter、img_head mid_ch
+- [ ] 修复推送并经过 CR 后合并
+- [ ] 触发新训练 run 验证 MODA 提升
+- [ ] 若 MODA 仍不足，考虑增加 epoch（10→20）或输入分辨率（720×1280→1080×1920）
 
 ---
 
@@ -117,4 +141,5 @@
 | 06-30 | 首次 MODA > 0 | 0.529 |
 | 07-01 | 配置全面对齐 MVDet | — |
 | 07-02 | 首次无数据泄露 eval | 0.441 |
+| 07-06 | 深入排查：发现 workflow 默认值、AMP、dilation 3 个遗漏问题 | — |
 | **目标** | **超越 MVDet 基线** | **≥ 0.882** |
