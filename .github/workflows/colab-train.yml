@@ -112,14 +112,34 @@ jobs:
           {
             echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}']"
             cat scripts/colab_train.py
-          } | colab exec -s bev-train --timeout 7200
-          # Download immediately after exec while session is still alive
+          } | colab exec -s bev-train --timeout 7200 > train_exec.log 2>&1 &
+          EXEC_PID=$!
+
+          tail -f train_exec.log &
+          TAIL_PID=$!
+
+          # 训练期间周期性下载最新 checkpoint（验证见 PR #80: colab download 可与
+          # colab exec 并发调用，10/10 成功）。即使 session 在脚本结束瞬间失联，
+          # 也最多损失一次轮询间隔（3分钟）内的训练进度。
           REMOTE="/content/BEV_Track-Predict/outputs"
+          while kill -0 $EXEC_PID 2>/dev/null; do
+            sleep 180
+            colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/model_final.pth" ./model_final.pth || true
+            colab download -s bev-train "$REMOTE/eval_results.json" ./eval_results.json || true
+          done
+
+          wait $EXEC_PID
+          EXEC_RET=$?
+          kill $TAIL_PID 2>/dev/null || true
+
+          # 训练结束后的最终尝试（可能拿到最新结果；若失败，已有周期性备份兜底）
           colab download -s bev-train "$REMOTE/eval_results.json"                                     ./eval_results.json   || true
           colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/model_final.pth"         ./model_final.pth     || true
           colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/metrics.csv"             ./metrics.csv         || true
           colab download -s bev-train "$REMOTE/visualization/bev_prediction.png"                      ./bev_prediction.png  || true
           colab download -s bev-train "$REMOTE/visualization/bev_overlay.png"                         ./bev_overlay.png     || true
+
+          exit $EXEC_RET
 
       - name: Print evaluation summary
         if: always()
