@@ -219,7 +219,8 @@ eval_cmd = [
     "--backbone",        "resnet18",
     "--frame_start",     "360",    # MVDet test split: last 10% (frames 360-399 of 400 annotations)
     "--max_frames",      "40",
-    "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50",
+    "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.225,0.25,0.275,0.30,0.325,0.35,0.375,0.40,0.425,0.45,0.475,0.50,0.55,0.60",
+    "--det_min_distances=3.0,4.0,5.0,6.0,7.0,8.0",
 ]
 print("命令：", " ".join(eval_cmd))
 eval_ret = run(eval_cmd, cwd=str(REPO_DIR), check=False)
@@ -230,7 +231,8 @@ if eval_out.exists():
     r = json.loads(eval_out.read_text())
     print("\n=== EVAL RESULTS (inline) ===")
     for k in ["det_moda", "det_modp", "det_precision", "det_recall", "det_f1",
-              "det_best_threshold", "det_moda_tp", "det_moda_fp", "det_moda_fn"]:
+              "det_best_threshold", "det_best_nms_radius",
+              "det_moda_tp", "det_moda_fp", "det_moda_fn"]:
         print(f"{k}: {r.get(k, 'N/A')}")
     print("=== END EVAL RESULTS ===", flush=True)
 else:
