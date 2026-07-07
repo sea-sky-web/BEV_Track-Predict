@@ -249,31 +249,4 @@ viz_cmd = [
 ]
 run(viz_cmd, cwd=str(REPO_DIR), check=False)
 
-# ── 7. 持久化到 Google Drive（避免 session 断开后无法下载）────────
-banner("7/7  保存到 Google Drive")
-import shutil
-
-DRIVE_OUT = Path("/content/drive/MyDrive/bev_outputs")
-try:
-    from google.colab import drive
-    drive.mount("/content/drive", force_remount=False)
-    DRIVE_OUT.mkdir(parents=True, exist_ok=True)
-
-    for src, name in [
-        (model_path, "model_final.pth"),
-        (eval_out, "eval_results.json"),
-        (Path(viz_dir) / "bev_prediction.png", "bev_prediction.png"),
-        (Path(viz_dir) / "bev_overlay.png", "bev_overlay.png"),
-    ]:
-        if src.exists():
-            shutil.copy2(str(src), str(DRIVE_OUT / name))
-            print(f"  [OK] {name} ({src.stat().st_size / 1e6:.1f} MB)")
-        else:
-            print(f"  [SKIP] {name} (not found)")
-
-    print(f"[OK] 已保存到 Google Drive: {DRIVE_OUT}")
-except Exception as e:
-    print(f"[WARN] Google Drive 保存失败: {e}")
-    print("[INFO] 结果仍可从 GA 日志中提取 EVAL RESULTS")
-
 print("[OK] 全部完成", flush=True)
