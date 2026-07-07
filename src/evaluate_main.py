@@ -117,10 +117,10 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--det_min_distance",
         type=float,
-        default=5.0,
+        default=6.0,
         help="Greedy NMS suppression radius in reduced BEV cells. "
-             "MVDet uses 50cm / 2.5cm-per-full-cell = 20 full-grid cells. "
-             "In reduced grid (×4): 50cm / 10cm-per-reduced-cell = 5.0.",
+             "Grid-sweep optimal: 6.0 (MODA=0.857). "
+             "MVDet equivalent: 5.0 (50cm / 10cm-per-reduced-cell).",
     )
     ap.add_argument(
         "--det_min_distances",
