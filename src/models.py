@@ -23,17 +23,29 @@ def normalize_fusion_mode(fusion_mode: str) -> str:
     return fusion_mode
 
 
-def _undilate_basic_resnet_layer(layer: nn.Sequential) -> None:
-    """Convert a torchvision ResNet-18 layer to stride-1 WITHOUT dilation.
+def _apply_mvdet_dilation(layer: nn.Sequential, previous_dilation: int, new_dilation: int) -> None:
+    """Apply MVDet's progressive dilation pattern to a ResNet-18 layer.
 
-    MVDet's old torchvision ignores the dilation param in BasicBlock entirely.
-    The only change is setting stride=1 for both conv and downsample, keeping
-    the pretrained weights compatible with their original contiguous 3×3 pattern.
+    MVDet's custom BasicBlock applies dilation ONLY to conv1.
+    Within a layer, the first block keeps the previous layer's dilation,
+    subsequent blocks use the new (larger) dilation.
+
+    For layer3 (dilate=True, original stride=2):
+      block0: conv1 dilation=previous(1), stride=1
+      block1: conv1 dilation=new(2)
+
+    For layer4 (dilate=True, original stride=2):
+      block0: conv1 dilation=previous(2), stride=1
+      block1: conv1 dilation=new(4)
     """
-    for block in layer:
+    blocks = list(layer.children())
+    for i, block in enumerate(blocks):
         if hasattr(block, "conv1"):
             if block.conv1.stride != (1, 1):
                 block.conv1.stride = (1, 1)
+            d = previous_dilation if i == 0 else new_dilation
+            block.conv1.dilation = (d, d)
+            block.conv1.padding = (d, d)
         if getattr(block, "downsample", None) is not None:
             conv = block.downsample[0]
             if hasattr(conv, "stride") and conv.stride != (1, 1):
@@ -53,10 +65,9 @@ class ResNet18Stride8Trunk(nn.Module):
         weights = ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
         m = resnet18(weights=weights)
 
-        # ResNet-18 uses BasicBlock, so torchvision's replace_stride_with_dilation
-        # path is not available. Patch layer3/layer4 after construction.
-        _undilate_basic_resnet_layer(m.layer3)
-        _undilate_basic_resnet_layer(m.layer4)
+        # MVDet progressive dilation: layer3 gets (prev=1, new=2), layer4 gets (prev=2, new=4)
+        _apply_mvdet_dilation(m.layer3, previous_dilation=1, new_dilation=2)
+        _apply_mvdet_dilation(m.layer4, previous_dilation=2, new_dilation=4)
 
         self.stem = nn.Sequential(m.conv1, m.bn1, m.relu, m.maxpool)
         self.layer1 = m.layer1
@@ -157,7 +168,7 @@ class ImgHeadFoot(nn.Module):
     这些单视角预测用作辅助监督，约束单视角特征学习。
     """
     
-    def __init__(self, in_ch: int = 512, mid_ch: int = 128):
+    def __init__(self, in_ch: int = 512, mid_ch: int = 64):
         """
         初始化图像预测头
         
