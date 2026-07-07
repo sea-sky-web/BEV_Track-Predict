@@ -1,6 +1,13 @@
-# 研究推进方法论 — 从 MODA=0 到 0.857 的教训
+# 经验沉淀 — LESSONS.md
 
-> 从 2026-05-04 到 2026-07-07 的排查过程中总结的方法论
+> Append-only。执行前必读，避免重蹈覆辙。
+> 分两部分：方法论规则 + 具体实验记录。
+
+---
+
+# Part A: 方法论规则
+
+> 从 2026-05-04 到 2026-07-07 的排查过程中总结
 
 ---
 
@@ -93,3 +100,57 @@
 - 使用网格扫描而非手动试错
 - 记录每个组合的完整指标，不只看最终最优值
 - 最优参数可能不在直觉预期的位置（6.0 比"精确匹配 MVDet"的 5.0 更优）
+
+---
+
+# Part B: 已尝试实验及结论
+
+> 格式：试了 X → 结果 Y → 结论 Z
+> 新条目追加在最后
+
+---
+
+## B1. 移除 AMP 混合精度 (07-06)
+
+- **假设**：AMP float16 精度不足 + OneCycleLR scheduler 失步导致 MODA 低
+- **实验**：移除 `--amp` 标志，其他配置不变
+- **结果**：MODA 0.441 → 0.444（几乎无变化）
+- **结论**：AMP 不是瓶颈。float32 训练在当前配置下与 AMP 效果一致
+- **验证方法**：对比 run 28560562597（有 AMP）vs run 28772291574（无 AMP）的实际 sys.argv 和 MODA
+
+## B2. 禁用 Color Jitter 增强 (07-06)
+
+- **假设**：MVDet 无增强，color jitter 在 10 epoch 内引入噪声阻碍收敛
+- **实验**：`--augment false`，其他配置不变
+- **结果**：MODA 0.441 → 0.444（与 B1 同一 run，无法单独归因，但整体无效果）
+- **结论**：color jitter 不是当前瓶颈。可在后续创新阶段重新启用
+
+## B3. 移除 Backbone Dilation（全部置为 1）(07-06)
+
+- **假设**：MVDet 旧版 torchvision BasicBlock 忽略 dilation
+- **实验**：`_undilate_basic_resnet_layer` 只保留 stride=1，不设 dilation
+- **结果**：MODA 0.441 → 0.444（同 run，无显著效果）
+- **结论**：后续发现 MVDet **确实使用渐进式 dilation**（从源码 resnet.py 确认），此修复方向错误。已在 PR #77 中改为精确匹配 MVDet 的渐进模式
+- **教训**：必须读原始代码，不能推测"旧版忽略 dilation"
+
+## B4. NMS 半径修正 20→5 (07-06) ★ 关键发现
+
+- **假设**：`det_min_distance=20` 在 reduced grid 上 = 2.0m，是 MVDet 0.5m 的 4 倍
+- **实验**：`det_min_distance=5.0`
+- **结果**：MODA 0.441 → **0.793**（+0.35！）Recall 0.456 → 0.900
+- **结论**：NMS 过度抑制是 MODA 0.44 的根因。2.0m 半径杀掉了拥挤区域的大量有效检测
+- **验证方法**：MVDet 源码 `nms.py:dist_thres=50/2.5=20` 是 full grid cells，我们错误地用在 reduced grid
+
+## B5. NMS 半径 + 阈值网格扫描 (07-07)
+
+- **实验**：6 个 NMS 半径 × 22 个阈值 = 132 组合
+- **结果**：最优 NMS=6.0, threshold=0.400, MODA=**0.857**
+- **结论**：NMS=6.0（0.6m）比精确匹配 MVDet 的 5.0（0.5m）更优。FP 从 95 降到 53
+- **NMS 半径影响**：3.0→过多 FP；5.0→均衡；6.0→最优；8.0→过多 FN
+
+## B6. Backbone 渐进式 Dilation 对齐 (07-07, pending)
+
+- **假设**：MVDet 自定义 BasicBlock 对 conv1 使用渐进 dilation (L3.B1=2, L4.B0=2, L4.B1=4)
+- **实验**：PR #77, run 28845973141（进行中）
+- **结果**：待确认
+- **预期**：MODA 接近 0.882 则 pipeline 验证通过
