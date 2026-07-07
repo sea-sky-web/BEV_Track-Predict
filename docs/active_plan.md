@@ -67,5 +67,7 @@ MODA matching: 0.5m (Hungarian)
 ## 下一步（待验证结果后决定）
 
 - 如果通过 → 切换到路线 B：在现有框架上创新超越 MVDet
-  - 候选方向：confidence fusion、增加 epoch、attention 机制
+  - 第二阶段方案与红队审查见 `docs/second_stage_innovation_review.md`
+  - 先完成 release-consistency audit：确认 release commit/checkpoint/eval JSON、修正或记录 `img_head mid_ch` 文档/代码矛盾、明确 `concat` 与 `confidence_v2` 的 BEV head confound
+  - 通过审查后再进入候选方向：geometry-reliability prompted fusion、confidence fusion、增加 epoch、attention 机制
 - 如果未通过 → 深入对比 backbone 输出特征、loss 数值、训练曲线
