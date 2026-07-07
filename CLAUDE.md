@@ -4,7 +4,7 @@
 
 ## 文档地图
 
-- `AGENTS.md` — AI 协作规则书（完整版）
+- `AGENTS.md` — AI 协作规则书（完整版，含全局工作流）
 - `docs/model_definition.md` — 模型架构约束（最高优先级）
 - `docs/active_plan.md` — 当前迭代计划（每轮覆盖）
 - `docs/LESSONS.md` — 经验沉淀（append-only，执行前必读）
@@ -12,6 +12,8 @@
 - `docs/experiment_iteration_protocol.md` — 实验迭代规范
 - `docs/dataset_contract.md` — 数据集契约
 - `docs/training_goals.md` — 训练目标
+- `docs/rules/risk-levels.md` — 风险分级定义（低/中/高）
+- `docs/rules/review-protocol.md` — 评审验证协议（反问验证机制）
 
 ## 核心纪律（摘要）
 

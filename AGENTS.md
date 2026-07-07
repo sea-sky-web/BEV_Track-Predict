@@ -339,3 +339,30 @@ Do not trigger runs autonomously. GPU time is expensive.
 ## 15. Lessons-First Rule
 
 Before proposing any approach, read `docs/LESSONS.md` to check if it (or something similar) was already tried. If it failed before, note why and propose alternatives.
+
+---
+
+## 16. Mandatory Workflow (Global)
+
+> 详细的风险分级定义见 `docs/rules/risk-levels.md`
+> 详细的评审验证协议见 `docs/rules/review-protocol.md`
+
+### Red Lines (No Exceptions)
+
+1. All code changes must go through user review — regardless of risk level or size.
+2. User must add annotations before commit — no annotation, no commit.
+3. AI must not proceed if user hasn't understood the change — verify understanding, don't accept rubber-stamp confirmations.
+
+### Workflow Steps
+
+1. **需求细化**: Reject vague requirements. Ask until decomposable into clear subtasks.
+2. **上下文调研 & 方案设计**: Read relevant files, determine risk level (low/medium/high per `docs/rules/risk-levels.md`), output modification plan.
+3. **方案评审 (mandatory gate)**: Verify user truly understands the plan per `docs/rules/review-protocol.md`. Cannot skip.
+4. **严格按方案执行**: No scope creep. If plan needs adjustment, return to step 3.
+5. **AI 自审**: After changes, self-review the diff independently. Report separately from changes.
+6. **变更审阅 & 提交 (mandatory gate)**: User must review every change with annotations. No annotation = no commit.
+
+### Circuit Breakers
+
+- **Loop breaker**: Same code modified >3 times → stop and reassess approach.
+- **Session drift guard**: >20 exchanges without completion → suggest new session with context summary.
