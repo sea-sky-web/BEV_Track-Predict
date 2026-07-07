@@ -122,6 +122,13 @@ def parse_args() -> argparse.Namespace:
              "MVDet uses 50cm / 2.5cm-per-full-cell = 20 full-grid cells. "
              "In reduced grid (×4): 50cm / 10cm-per-reduced-cell = 5.0.",
     )
+    ap.add_argument(
+        "--det_min_distances",
+        type=str,
+        default="",
+        help="Comma-separated NMS radii to sweep (e.g. 3.0,4.0,5.0,6.0,7.0,8.0). "
+             "When set, overrides --det_min_distance and runs a full threshold sweep per radius.",
+    )
     ap.add_argument("--det_max_preds", type=int, default=0, help="Max predictions per frame (0=unlimited, MVDet uses top_k sort then NMS)")
 
     ap.add_argument(
@@ -152,6 +159,16 @@ def parse_thresholds(raw: str) -> List[float]:
         raise ValueError("det_thresholds cannot be empty.")
     vals = sorted(set(vals))
     return vals
+
+
+def parse_min_distances(raw: str) -> List[float]:
+    vals: List[float] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        vals.append(float(token))
+    return sorted(set(vals))
 
 
 def _build_projection(
@@ -623,22 +640,50 @@ def main() -> Dict[str, float]:
     if args.report_detection:
         thresholds = parse_thresholds(args.det_thresholds)
         bev_cell_m = step_m * args.bev_down
-        rows, best = evaluate_detection(
-            pred_maps=pred_maps,
-            gt_maps=gt_maps,
-            thresholds=thresholds,
-            dist_thr=args.det_dist_thr,
-            nms_ksize=args.det_nms_ksize,
-            max_preds=args.det_max_preds,
-            bev_cell_m=bev_cell_m,
-            min_distance=args.det_min_distance,
-            moda_dist_m=args.det_moda_dist_m,
-        )
-        _print_detection_table(rows, best_threshold=best["threshold"])
+
+        nms_radii = parse_min_distances(args.det_min_distances) if args.det_min_distances else [args.det_min_distance]
+
+        global_best = None
+        global_best_nms = None
+        all_sweep_results = []
+
+        for nms_r in nms_radii:
+            rows, best = evaluate_detection(
+                pred_maps=pred_maps,
+                gt_maps=gt_maps,
+                thresholds=thresholds,
+                dist_thr=args.det_dist_thr,
+                nms_ksize=args.det_nms_ksize,
+                max_preds=args.det_max_preds,
+                bev_cell_m=bev_cell_m,
+                min_distance=nms_r,
+                moda_dist_m=args.det_moda_dist_m,
+            )
+
+            if len(nms_radii) > 1:
+                print(f"\n[NMS={nms_r:.1f}] best: thr={best['threshold']:.3f}, "
+                      f"moda={best['moda']:.4f}, f1={best['f1']:.4f}, "
+                      f"prec={best['precision']:.4f}, recall={best['recall']:.4f}, "
+                      f"tp={int(best['moda_tp'])}, fp={int(best['moda_fp'])}, fn={int(best['moda_fn'])}")
+
+            for row in rows:
+                row["nms_radius"] = float(nms_r)
+            all_sweep_results.extend(rows)
+
+            if global_best is None or best["moda"] > global_best["moda"]:
+                global_best = best
+                global_best_nms = nms_r
+                global_best_rows = rows
+
+        best = global_best
+        best["nms_radius"] = float(global_best_nms)
+
+        _print_detection_table(global_best_rows, best_threshold=best["threshold"])
 
         print(
             "[BEST] "
-            f"thr={best['threshold']:.2f}, "
+            f"nms={global_best_nms:.1f}, "
+            f"thr={best['threshold']:.3f}, "
             f"precision={best['precision']:.4f}, "
             f"recall={best['recall']:.4f}, "
             f"f1={best['f1']:.4f}, "
@@ -650,6 +695,7 @@ def main() -> Dict[str, float]:
         final_metrics.update(
             {
                 "det_best_threshold": float(best["threshold"]),
+                "det_best_nms_radius": float(global_best_nms),
                 "det_precision": float(best["precision"]),
                 "det_recall": float(best["recall"]),
                 "det_f1": float(best["f1"]),
@@ -667,7 +713,7 @@ def main() -> Dict[str, float]:
             }
         )
         output_payload.update(final_metrics)
-        output_payload["det_sweep"] = rows
+        output_payload["det_sweep"] = all_sweep_results
         output_payload["det_best"] = best
 
     if args.metrics_out:
