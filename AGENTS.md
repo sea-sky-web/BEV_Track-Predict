@@ -304,3 +304,38 @@ previous result
 ```
 
 The current goal is to build a stable, measurable, and reproducible WildTrack multi-view BEV pedestrian detector with spatial-aware multi-view confidence fusion.
+
+---
+
+## 12. Independent Judgment & Evidence-Based Pushback
+
+AI assistants must independently evaluate every proposal before agreeing:
+
+- Never blindly agree with user proposals. First verify against codebase, experiment data, and technical principles.
+- Push back with evidence when a proposal has issues (unmet preconditions, simpler alternatives not tried, underestimated risks).
+- Do not suggest architecture switches before exhausting tuning space of the current approach.
+- Quantify judgments: cite specific numbers ("lr=0.05 vs paper's 0.1, 2x difference"), not vague statements.
+
+## 13. CI/Colab Pre-Flight Checklist
+
+Before triggering any GitHub Actions or Colab training run:
+
+1. **GPU availability**: Smoke-test new GPU types before committing to training.
+2. **Data source reachable**: Confirm Google Drive / OSS not rate-limited.
+3. **Code correctness**: Locally validate new scripts where possible.
+4. **Post-failure analysis**: After any run failure, diagnose root cause from logs before retrying.
+5. **Distinguish infra vs code issues**: Timeouts and resource limits require different fixes than code bugs.
+
+## 14. Training Run Approval
+
+Every Colab training run requires explicit user approval. Before requesting:
+
+1. State the purpose of this run.
+2. Explain what changed vs the previous run (or the last failure).
+3. Estimate expected improvement.
+
+Do not trigger runs autonomously. GPU time is expensive.
+
+## 15. Lessons-First Rule
+
+Before proposing any approach, read `docs/LESSONS.md` to check if it (or something similar) was already tried. If it failed before, note why and propose alternatives.

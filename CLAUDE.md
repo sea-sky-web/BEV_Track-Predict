@@ -1,49 +1,22 @@
-# CLAUDE.md — BEV_Track-Predict 项目纪律
+# CLAUDE.md — BEV_Track-Predict
 
-## 独立判断与方案审查
+> Claude Code 自动加载此文件。完整规则见 AGENTS.md。
 
-用户的上下文往往有限，提出的方案可能基于不完整信息。**Claude 必须在同意任何方案前独立评估其可行性**：
+## 文档地图
 
-- **禁止盲目赞同**：用户提出方案或问题解决计划时，先基于代码库现状、已有实验数据、技术原理进行独立判断，再决定是否同意
-- **有依据地反驳**：如果方案存在问题（如前提条件不满足、有更简单的替代方案未尝试、风险被低估），必须明确指出并给出依据（代码引用、数据对比、论文参考）
-- **避免过早架构切换**：在当前方案的调优空间未穷尽前，不建议切换到更复杂的架构。更复杂的架构会放大已有的实现 bug，增加调试难度
-- **量化判断依据**：反驳或建议时，尽可能提供具体数据（如 "lr=0.05 vs 论文 0.1，相差 2 倍"、"只训练了 10 epochs，论文可能使用了 20+"），而非泛泛而谈
+- `AGENTS.md` — AI 协作规则书（完整版）
+- `docs/model_definition.md` — 模型架构约束（最高优先级）
+- `docs/active_plan.md` — 当前迭代计划（每轮覆盖）
+- `docs/LESSONS.md` — 经验沉淀（append-only，执行前必读）
+- `docs/daily-log.md` — 每日实验日志（UTC+0）
+- `docs/experiment_iteration_protocol.md` — 实验迭代规范
+- `docs/dataset_contract.md` — 数据集契约
+- `docs/training_goals.md` — 训练目标
 
-## 触发 CI/Colab 任务前的强制检查清单
+## 核心纪律（摘要）
 
-每次触发 GitHub Actions 或 Colab 训练任务前，**必须按顺序完成以下检查**，不得跳过：
-
-### 1. 验证前提条件
-
-- **GPU 可用性**：首次使用某 GPU 型号时，先用 smoke test 验证（`echo "import torch; print(torch.cuda.get_device_name())" | colab exec`），确认 session 真正可用后再提交训练任务
-- **数据源可达**：确认 Google Drive / OSS 等外部数据源未被限流。如果近期（1小时内）有多次下载失败，等待 cooldown 或切换数据源
-- **代码正确性**：新增/修改的脚本，如果能本地验证（如可视化脚本用假数据），先本地跑通再提交
-
-### 2. 分析前提条件
-
-- **出错后禁止立刻重试**：任何 run 失败后，必须先查日志定位根因，确认修复后再触发下一个 run
-- **区分基础设施问题 vs 代码问题**：连接超时、资源不可用、下载限流属于基础设施问题，重试代码不会解决；代码 bug 需要修改后才能重试
-- **评估修复完整性**：一个修复是否真的解决了问题？是否只是把错误从一个地方移到了另一个地方？在触发前想清楚整条链路
-
-### 3. 最小化测试
-
-- **新功能先小规模验证**：新的训练配置先用 1 epoch + 少量 frames 跑通，确认流程无误后再全量训练
-- **可视化先检查数据分布**：写可视化代码前，先打印数据的 min/max/mean/std，基于实际分布选择可视化方法，不凭直觉
-- **模型质量匹配任务**：需要展示检测效果时，必须使用充分训练的模型（≥10 epochs），不用 1 epoch 的半成品
-
-### 4. 执行纪律
-
-- **所有代码变更通过 PR 提交**：禁止直接 push 到 main。创建分支 → 提交 → 创建 PR → 等待 CR（Jules/Gemini）→ 阅读并处理 review 意见 → 合并
-- **关键产出就地导出**：checkpoint、指标、图片的 base64 导出必须在生成它们的同一个 `colab exec` 上下文中完成，不依赖后续步骤或 session 存活
-- **触发训练 run 需用户批准**：每次 Colab 训练耗费大量 GPU 时间和资源，禁止自行触发。必须先向用户说明：(1) 本次 run 的目的，(2) 与上次（或上一个失败 run）的差异是什么，以及该改变是否足以解决问题，(3) 预期改善多少，等用户明确批准后再触发
-- **禁止用 `|| true` 吞关键步骤的错误**：数据下载、checkpoint 下载、eval 执行等关键步骤失败必须报错，不得静默跳过
-- **GPU 优先级**：优先 A100 > L4 > T4，但必须先验证可用性再使用。当前 Colab 免费账号仅 T4 可用
-- **每次 run 触发前自问**：这个 run 和上一个失败的 run 相比，改变了什么？这个改变是否足以解决问题？
-
-## 项目约定
-
-- 训练配置：SGD, lr=0.05, OneCycleLR, grad_clip=1.0, concat fusion, resnet18 backbone
-- BEV 网格：NB_HEIGHT=480 (i/rows), NB_WIDTH=1440 (j/cols), reduce_factor=4 → 120×360
-- positionID 解码：`ix = pos % 480, iy = pos // 480`
-- Gaussian kernel：MAP_SIGMA=2.2361 (variance=5.0), IMG_SIGMA=1.5811 (variance=2.5)
-- 数据集：WildTrack 7 cameras, Google Drive folder ID: 1uBptJBbtMzVRQwSMRbQkIJp8-VVoBqUK
+1. **独立判断**：禁止盲目赞同，用代码和数据支撑每个判断
+2. **实证优先**：禁止"可能"，每个假设必须有证据链
+3. **PR 流程**：所有变更通过 PR → CR → 合并
+4. **训练审批**：触发 Colab run 前必须说明目的、差异、预期，用户批准后执行
+5. **执行前读 LESSONS.md**：避免重蹈覆辙
