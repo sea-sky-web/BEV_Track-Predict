@@ -57,6 +57,8 @@ parser.add_argument("--max_frames", type=int, default=360,
                     help="Max training frames (MVDet train split = 360)")
 parser.add_argument("--loss_type", default="mse", choices=["mse", "focal"],
                     help="BEV loss: mse (MVDet baseline) or focal (CenterNet-style)")
+parser.add_argument("--offset_weight", type=float, default=0.0,
+                    help="Offset L1 loss weight (0.0 = disable offset training)")
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
@@ -193,6 +195,7 @@ if args.epochs > 0:
     "--device",                 args.device,
     "--log_every",              "20",
     "--loss_type",              args.loss_type,
+    "--offset_weight",          str(args.offset_weight),
 ]
 
     print("命令：", " ".join(train_cmd))
@@ -225,8 +228,9 @@ eval_cmd = [
     "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.225,0.25,0.275,0.30,0.325,0.35,0.375,0.40,0.425,0.45,0.475,0.50,0.55,0.60",
     "--det_min_distances=3.0,4.0,5.0,6.0,7.0,8.0",
     "--loss_type",       args.loss_type,
-    "--use_offset",
 ]
+if args.offset_weight > 0:
+    eval_cmd.append("--use_offset")
 print("命令：", " ".join(eval_cmd))
 eval_ret = run(eval_cmd, cwd=str(REPO_DIR), check=False)
 print(f"\n[EVAL] exit code: {eval_ret}", flush=True)
