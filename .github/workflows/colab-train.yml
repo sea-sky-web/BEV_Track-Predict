@@ -105,7 +105,19 @@ jobs:
           echo "Found checkpoint: $CKPT ($(du -h "$CKPT" | cut -f1))"
           REMOTE="/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3"
           echo "import os; os.makedirs('$REMOTE', exist_ok=True)" | colab exec -s bev-train
-          colab upload -s bev-train "$CKPT" "$REMOTE/model_final.pth"
+          # Retry upload up to 3 times — proxy connection has been observed to drop
+          # mid-transfer for the ~126M checkpoint (SSLEOFError), same class of
+          # flakiness as `colab new` above.
+          for attempt in 1 2 3; do
+            echo "=== Upload attempt $attempt ==="
+            colab upload -s bev-train "$CKPT" "$REMOTE/model_final.pth" && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "[ERROR] Checkpoint upload failed after 3 attempts"
+              exit 1
+            fi
+            echo "Attempt $attempt failed, retrying in 15s..."
+            sleep 15
+          done
           echo "[OK] Checkpoint uploaded to Colab"
         env:
           GH_TOKEN: ${{ github.token }}
