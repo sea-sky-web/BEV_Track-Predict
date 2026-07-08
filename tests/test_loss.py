@@ -9,7 +9,7 @@ torch = pytest.importorskip("torch")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from loss import GaussianMSE, WeightedGaussianMSE, create_loss_criterion
+from loss import GaussianMSE, WeightedGaussianMSE, PenaltyReducedFocalLoss, create_loss_criterion
 from utils import build_gaussian_kernel_2d
 
 
@@ -85,3 +85,34 @@ def test_weighted_loss_accepts_multichannel():
     loss = WeightedGaussianMSE(pos_weight=10.0)(pred, tgt, kernel)
     assert torch.isfinite(loss)
     assert loss.item() >= 0.0
+
+
+def test_focal_loss_finite_and_positive():
+    kernel = _kernel()
+    pred = torch.randn(2, 1, 16, 16)
+    tgt = torch.zeros(2, 1, 32, 32)
+    tgt[:, :, 8, 8] = 1.0
+    loss = PenaltyReducedFocalLoss()(pred, tgt, kernel)
+    assert torch.isfinite(loss)
+    assert loss.item() > 0.0
+
+
+def test_focal_loss_decreases_as_prediction_approaches_target():
+    kernel = _kernel(size=7, sigma=1.5)
+    tgt = torch.zeros(1, 1, 8, 8)
+    tgt[0, 0, 4, 4] = 1.0
+
+    far_logits = torch.full((1, 1, 8, 8), -5.0)
+    near_logits = torch.full((1, 1, 8, 8), -5.0)
+    near_logits[0, 0, 4, 4] = 5.0
+
+    loss_far = PenaltyReducedFocalLoss()(far_logits, tgt.clone(), kernel)
+    loss_near = PenaltyReducedFocalLoss()(near_logits, tgt.clone(), kernel)
+    assert loss_near.item() < loss_far.item()
+
+
+def test_create_loss_criterion_focal():
+    c = create_loss_criterion(loss_type="focal", focal_alpha=2.0, focal_beta=4.0)
+    assert isinstance(c, PenaltyReducedFocalLoss)
+    assert c.alpha == 2.0
+    assert c.beta == 4.0

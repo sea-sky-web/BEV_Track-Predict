@@ -19,6 +19,14 @@ on:
         description: '训练帧数上限（MVDet train split = 360）'
         default: '360'
         required: false
+      loss_type:
+        description: 'BEV loss 类型：mse (baseline) / focal (CenterNet-style)'
+        default: 'mse'
+        required: false
+      offset_weight:
+        description: 'Offset 回归 L1 loss 权重（0.0 = 禁用 offset loss）'
+        default: '0.0'
+        required: false
       checkpoint_run:
         description: 'eval-only: 从指定 GA run ID 下载 checkpoint（配合 epochs=0）'
         default: ''
@@ -110,7 +118,7 @@ jobs:
         continue-on-error: true
         run: |
           {
-            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}']"
+            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}', '--loss_type', '${{ inputs.loss_type }}', '--offset_weight', '${{ inputs.offset_weight }}']"
             cat scripts/colab_train.py
           } | colab exec -s bev-train --timeout 7200 > train_exec.log 2>&1 &
           EXEC_PID=$!

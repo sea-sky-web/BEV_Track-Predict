@@ -426,6 +426,13 @@ class MVDetLikeNet(nn.Module):
             self.bev_head = MVDetMapClassifier(in_ch=in_bev)
         else:
             self.bev_head = BEVHeadDilated(in_ch=in_bev, mid_ch=256)
+        
+        # Offset 回归头（亚像素精度定位）
+        self.offset_head = nn.Sequential(
+            nn.Conv2d(in_bev, 64, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 2, 1),
+        )
     
     def forward(self, x_views: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -486,8 +493,9 @@ class MVDetLikeNet(nn.Module):
         
         # BEV 融合预测
         map_logits = self.bev_head(bev_fused)  # (B, 1, Hb, Wb)
+        offset_preds = self.offset_head(bev_fused)  # (B, 2, Hb, Wb)
         
-        return map_logits, imgs_logits
+        return map_logits, offset_preds, imgs_logits
 
 
 def create_model(

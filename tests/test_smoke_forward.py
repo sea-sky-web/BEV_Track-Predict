@@ -36,11 +36,13 @@ def test_resnet18_forward_shapes_for_fusion_modes(fusion_mode):
     x = torch.randn(1, 2, 3, 64, 64)
 
     with torch.no_grad():
-        map_logits, imgs_logits = model(x)
+        map_logits, offset_preds, imgs_logits = model(x)
 
     assert map_logits.shape == (1, 1, 8, 8)
+    assert offset_preds.shape == (1, 2, 8, 8)
     assert imgs_logits.shape == (1, 2, 2, 8, 8)
     assert torch.isfinite(map_logits).all()
+    assert torch.isfinite(offset_preds).all()
     assert torch.isfinite(imgs_logits).all()
 
 
@@ -49,8 +51,8 @@ def test_confidence_v2_backward_reaches_backbone():
     model.train()
     x = torch.randn(1, 2, 3, 64, 64)
 
-    map_logits, imgs_logits = model(x)
-    (map_logits.mean() + imgs_logits.mean()).backward()
+    map_logits, offset_preds, imgs_logits = model(x)
+    (map_logits.mean() + offset_preds.mean() + imgs_logits.mean()).backward()
 
     backbone_grads = [p.grad for p in model.backbone.parameters() if p.requires_grad]
     assert any(g is not None and torch.isfinite(g).all() for g in backbone_grads)
