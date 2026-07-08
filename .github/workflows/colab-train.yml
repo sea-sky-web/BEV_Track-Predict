@@ -105,19 +105,40 @@ jobs:
           echo "Found checkpoint: $CKPT ($(du -h "$CKPT" | cut -f1))"
           REMOTE="/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3"
           echo "import os; os.makedirs('$REMOTE', exist_ok=True)" | colab exec -s bev-train
-          # Retry upload up to 3 times — proxy connection has been observed to drop
-          # mid-transfer for the ~126M checkpoint (SSLEOFError), same class of
-          # flakiness as `colab new` above.
-          for attempt in 1 2 3; do
-            echo "=== Upload attempt $attempt ==="
-            colab upload -s bev-train "$CKPT" "$REMOTE/model_final.pth" && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "[ERROR] Checkpoint upload failed after 3 attempts"
-              exit 1
-            fi
-            echo "Attempt $attempt failed, retrying in 15s..."
-            sleep 15
+
+          # `colab upload` on the full ~126M file reliably drops with SSLEOFError
+          # (3/3 retries failed identically in runs 28937281619, 28943896817,
+          # 28952018458) — the proxy connection can't sustain one long upload
+          # stream. Split into small chunks so each upload is a short-lived
+          # connection, then reassemble on the Colab side with cat.
+          CHUNK_DIR=/tmp/ckpt_chunks
+          mkdir -p "$CHUNK_DIR"
+          split -b 8m "$CKPT" "$CHUNK_DIR/chunk_"
+          echo "import os; os.makedirs('$REMOTE/_chunks', exist_ok=True)" | colab exec -s bev-train
+
+          for part in "$CHUNK_DIR"/chunk_*; do
+            name=$(basename "$part")
+            for attempt in 1 2 3; do
+              echo "=== Upload $name attempt $attempt ==="
+              colab upload -s bev-train "$part" "$REMOTE/_chunks/$name" && break
+              if [ "$attempt" -eq 3 ]; then
+                echo "[ERROR] Checkpoint chunk $name failed after 3 attempts"
+                exit 1
+              fi
+              echo "Attempt $attempt failed, retrying in 10s..."
+              sleep 10
+            done
           done
+
+          echo "import glob, shutil
+          parts = sorted(glob.glob('$REMOTE/_chunks/chunk_*'))
+          with open('$REMOTE/model_final.pth', 'wb') as out:
+              for p in parts:
+                  with open(p, 'rb') as f:
+                      shutil.copyfileobj(f, out)
+          shutil.rmtree('$REMOTE/_chunks')
+          print('[OK] Reassembled', len(parts), 'chunks')
+          " | colab exec -s bev-train
           echo "[OK] Checkpoint uploaded to Colab"
         env:
           GH_TOKEN: ${{ github.token }}
