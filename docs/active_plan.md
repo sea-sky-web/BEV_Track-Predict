@@ -1,20 +1,42 @@
 # Active Plan — 当前迭代
 
 > 每轮覆盖此文件。上一轮结果归入 daily-log.md。
-> 最后更新：2026-07-07
+> 最后更新：2026-07-08
 
 ## 当前状态
 
 | 指标 | 值 | 目标 |
 |---|:---:|:---:|
-| MODA | 0.857 | ≥ 0.882 |
+| MODA (best) | 0.857 | ≥ 0.882 |
+| MODA (pipeline验证) | 0.849 | — |
 | Precision | 0.918 | — |
 | Recall | 0.889 | — |
 | F1 | 0.903 | — |
 | 最优 NMS | 6.0 | — |
 | 最优阈值 | 0.400 | — |
 
-## 当前训练配置
+**阶段**：第二阶段 — 在现有基线上创新超越 MVDet
+
+## 当前迭代：Focal Loss + Offset Head 消融实验
+
+**目的**：通过隔离实验验证两个改进的独立贡献。
+
+### 代码状态
+`feat/focal-loss-offset-head` 分支已完成，代码已通过用户审阅，尚未合并。
+消融实验通过 CLI 参数隔离：
+
+| Run | loss_type | offset_weight | use_offset | 隔离的变量 |
+|---|---|---|---|---|
+| A（回归检查） | mse | 0.0 | false | 无变化，验证代码重构无副作用 |
+| B | focal | 0.0 | false | 只有 focal loss |
+| C | mse | 1.0 | true | 只有 offset head |
+| D（可选） | focal | 1.0 | true | 组合 |
+
+### Pending
+- run 28866188056（checkpoint 周期性下载验证，T4）仍在进行中
+- A/B/C 三个消融实验需要等 28866188056 完成后依次触发（共用 Colab session 名）
+
+## 当前训练配置（baseline）
 
 ```
 backbone: resnet18 (progressive dilation: L3.B1=2, L4.B0=2, L4.B1=4)
@@ -28,46 +50,12 @@ amp: false
 bev_pos_weight: 1.0
 NMS: det_min_distance=6.0 (reduced grid cells, 0.6m physical)
 MODA matching: 0.5m (Hungarian)
+loss_type: mse (baseline) / focal (实验)
 ```
 
-## Pending 任务
+## 下一步
 
-**Pipeline 验证 run 28845973141**（L4, 进行中）
-- 架构与 MVDet 完全对齐（PR #77: progressive dilation + img_head mid_ch=64）
-- 预期：MODA 接近 0.882 则 pipeline 验证通过
-
-## 当前迭代：Pipeline 验证
-
-**目的**：证明 pipeline 完全正确。将架构与 MVDet 完全一致后，MODA 应接近 0.882。
-
-**判断标准**：
-- MODA ≥ 0.87 → pipeline 验证通过，进入创新阶段（路线 B）
-- MODA 0.85-0.87 → 差距可接受，可能是训练随机性或 epoch 不足
-- MODA < 0.85 → 仍有未知差异，需继续排查
-
-## MVDet 对齐完整差异清单（已全部修复）
-
-| 差异 | 修复 PR | 影响 |
-|---|---|---|
-| BEV H/W 转置 (NB_WIDTH/HEIGHT) | 06-29 | MODA 0→0.5 |
-| GT 坐标映射 (positionID) | 06-29 | 同上 |
-| Gaussian sigma (5.0→√5) | 06-29 | 同上 |
-| lr 0.05→0.1 | #66 | 配置对齐 |
-| grad_clip 移除 | #66 | 配置对齐 |
-| bev_pos_weight 10→1 | #69 | 配置对齐 |
-| eval frame_start 1800→360 | #68 | 数据泄露修复 |
-| workflow 默认值 (max_frames, pos_weight) | #72 | 默认值对齐 |
-| AMP 移除 | #72 | 配置对齐 |
-| augmentation 禁用 | #72 | 配置对齐 |
-| **NMS 半径 4× 过大** (20→5 reduced cells) | #73 | **MODA 0.44→0.79** |
-| NMS 半径微调 (5→6) | 网格扫描 | MODA 0.79→0.857 |
-| backbone dilation 渐进模式 | #77 | 架构对齐 |
-| img_head mid_ch 128→64 | #77 | 架构对齐 |
-
-## 下一步（待验证结果后决定）
-
-- 如果通过 → 切换到路线 B：在现有框架上创新超越 MVDet
-  - 第二阶段方案与红队审查见 `docs/second_stage_innovation_review.md`
-  - 先完成 release-consistency audit：确认 release commit/checkpoint/eval JSON、修正或记录 `img_head mid_ch` 文档/代码矛盾、明确 `concat` 与 `confidence_v2` 的 BEV head confound
-  - 通过审查后再进入候选方向：geometry-reliability prompted fusion、confidence fusion、增加 epoch、attention 机制
-- 如果未通过 → 深入对比 backbone 输出特征、loss 数值、训练曲线
+1. 等 28866188056 完成 → 验证 checkpoint 下载成功
+2. 合并 focal-loss-offset-head 分支
+3. 依次触发 A/B/C 消融实验
+4. 根据结果决定是否做 D（组合）

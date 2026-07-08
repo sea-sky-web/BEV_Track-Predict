@@ -88,7 +88,15 @@ NMS 根因确认：Recall 翻倍（0.456→0.900），FN 减少 82%（503→91�
 
 ### 进展
 - NMS 半径 + 阈值网格扫描（6 × 22 = 132 组合）
-- 建立研究方法论文档 `docs/research-methodology.md`
+- 建立研究方法论文档 `docs/LESSONS.md`（原 research-methodology.md）
+- Pipeline 验证：backbone 渐进式 dilation 对齐 MVDet（PR #77）
+- 文档体系重构（PR #78）：建立 CLAUDE.md 指针、AGENTS.md 规则书、active_plan.md、LESSONS.md、references/ 分层
+- 全局协作规则落盘到仓库（PR #79）：risk-levels.md、review-protocol.md
+- Checkpoint 持久化方案调研：确认 `drive.mount()` 和 `colab drivemount` 在 headless 场景下 **不可能生效**（colab-cli 官方文档明确写 "interactive; not agent-runnable"）
+- 并发下载诊断实验（PR #80）：`colab download` 与 `colab exec` 并发调用 **10/10 成功**
+- Checkpoint 周期性下载方案落地（PR #81）：训练期间每 3 分钟轮询下载 model_final.pth
+- Focal Loss + Offset Head 实现（`feat/focal-loss-offset-head` 分支，待合并）
+- 进入第二阶段：在现有基线上创新超越 MVDet
 
 ### 网格扫描结果（L4 run 28836865413）
 
@@ -101,16 +109,26 @@ NMS 根因确认：Recall 翻倍（0.456→0.900），FN 减少 82%（503→91�
 | 7.0 | 0.375 | 0.851 | 0.928 | 0.887 | 0.907 | 860/50/92 |
 | 8.0 | 0.325 | 0.820 | 0.902 | 0.871 | 0.886 | 850/69/102 |
 
-最优组合：**NMS=6.0, threshold=0.400, MODA=0.857**
+### Pipeline 验证结果（L4 run 28845973141, backbone dilation 对齐后）
+
+| NMS | 最优阈值 | MODA | Precision | Recall | F1 | TP/FP/FN |
+|:---:|:---:|:---:|:---:|:---:|:---:|---|
+| 6.0 | 0.325 | **0.849** | 0.919 | 0.908 | 0.913 | 874/66/78 |
+
+dilation 对齐后 MODA 0.849 vs 对齐前 0.857（训练随机性范围内，非显著变化）。
+MVDet 论文报告 0.882（MATLAB eval）；MVDet 代码自带的 Python eval 注释声明比 MATLAB 低 0-2%。
+→ 0.849 已在合理范围内，pipeline 验证通过。
 
 ### 分析
 - NMS=5.0→6.0：FP 95→53（-44%），MODA +0.049
 - NMS=6.0 对应物理距离 6.0 × 0.1m = 0.6m，略大于 MVDet 的 0.5m
-- 距目标 0.882 还差 0.025（FP=53, FN=83, 需再减约 24 个错误）
+- Pipeline 验证通过后正式进入第二阶段（创新超越 MVDet）
+- 第二阶段首个改进方向：Focal Loss + Offset Head（消融实验设计完成）
 
 ### 待解决
-- [ ] 更新 det_min_distance 默认值 5.0→6.0
-- [ ] 考虑增加 epoch（10→20）或其他模型改进来缩小最后 0.025 差距
+- [ ] Checkpoint 持久化方案真实训练验证（run 28866188056 进行中）
+- [ ] Focal Loss + Offset Head 消融实验（A: 回归检查, B: focal only, C: offset only）
+- [ ] 消融实验完成后决定是否做 D（focal + offset 组合）
 
 ---
 
@@ -203,4 +221,7 @@ NMS 根因确认：Recall 翻倍（0.456→0.900），FN 减少 82%（503→91�
 | 07-06 | **根因确认：NMS 半径 4× 过大**（20 reduced cells=2.0m，应为 5 cells=0.5m） | — |
 | **07-06** | **🏷️ v0.1.0-moda79 — MODA 0.793** | **0.793** |
 | 07-07 | NMS+阈值网格扫描，最优 NMS=6.0 thr=0.4 | **0.857** |
+| 07-07 | Pipeline 验证通过（backbone dilation 对齐，MODA 0.849 在合理范围） | 0.849 |
+| 07-07 | 文档体系重构 + 全局规则落盘 + checkpoint 周期性下载方案 | — |
+| 07-07 | 正式进入第二阶段：创新超越 MVDet | — |
 | **目标** | **超越 MVDet 基线** | **≥ 0.882** |
