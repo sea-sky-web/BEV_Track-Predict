@@ -21,6 +21,9 @@ from calibration import CalibrationLoader, decide_unit_scale, parse_rectangles_p
 from config import (
     CAM_NAMES,
     DEFAULT_ALPHA,
+    DEFAULT_LOSS_TYPE,
+    DEFAULT_FOCAL_ALPHA,
+    DEFAULT_FOCAL_BETA,
     DEFAULT_BACKBONE,
     DEFAULT_BATCH_SIZE,
     DEFAULT_BEV_DOWN,
@@ -47,7 +50,7 @@ from config import (
 )
 from dataset import create_wildtrack_dataset
 from geometry import build_mvdet_proj_mat, compute_valid_ratio_from_homography, make_worldgrid2worldcoord_mat
-from loss import GaussianMSE
+from loss import GaussianMSE, create_loss_criterion
 from metrics import aggregate_metrics, compute_moda_modp
 from models import create_model
 from utils import build_gaussian_kernel_2d
@@ -98,6 +101,10 @@ def parse_args() -> argparse.Namespace:
     )
 
     ap.add_argument("--alpha", type=float, default=DEFAULT_ALPHA, help="Aux image loss weight")
+    ap.add_argument("--loss_type", type=str, default=DEFAULT_LOSS_TYPE, choices=["mse", "focal"],
+                    help="BEV loss type used by the checkpoint (for reference loss metrics only).")
+    ap.add_argument("--focal_alpha", type=float, default=DEFAULT_FOCAL_ALPHA)
+    ap.add_argument("--focal_beta", type=float, default=DEFAULT_FOCAL_BETA)
     ap.add_argument("--map_ksize", type=int, default=DEFAULT_MAP_KSIZE, help="Gaussian kernel size for BEV")
     ap.add_argument("--map_sigma", type=float, default=DEFAULT_MAP_SIGMA, help="Gaussian sigma for BEV")
     ap.add_argument("--img_ksize", type=int, default=DEFAULT_IMG_KSIZE, help="Gaussian kernel size for image")
@@ -130,6 +137,11 @@ def parse_args() -> argparse.Namespace:
              "When set, overrides --det_min_distance and runs a full threshold sweep per radius.",
     )
     ap.add_argument("--det_max_preds", type=int, default=0, help="Max predictions per frame (0=unlimited, MVDet uses top_k sort then NMS)")
+    ap.add_argument(
+        "--use_offset",
+        action="store_true",
+        help="Apply the model's offset head prediction to refine detection point coordinates.",
+    )
 
     ap.add_argument(
         "--metrics_out",
@@ -243,8 +255,11 @@ def evaluate_model(
     alpha: float,
     log_every: int = 20,
     collect_detection_inputs: bool = False,
+    loss_type: str = "mse",
+    focal_alpha: float = 2.0,
+    focal_beta: float = 4.0,
 ) -> Tuple[Dict[str, float], List[torch.Tensor], List[torch.Tensor]]:
-    criterion = GaussianMSE()
+    criterion = create_loss_criterion(loss_type=loss_type, focal_alpha=focal_alpha, focal_beta=focal_beta)
     losses: List[float] = []
     bev_losses: List[float] = []
     img_losses: List[float] = []
@@ -253,6 +268,7 @@ def evaluate_model(
 
     pred_maps: List[torch.Tensor] = []
     gt_maps: List[torch.Tensor] = []
+    offset_maps: List[torch.Tensor] = []
 
     model.eval()
     with torch.no_grad():
@@ -261,7 +277,7 @@ def evaluate_model(
             map_gt = map_gt.to(device, non_blocking=True)
             imgs_gt = imgs_gt.to(device, non_blocking=True)
 
-            map_logits, imgs_logits = model(x_views)
+            map_logits, offset_preds, imgs_logits = model(x_views)
 
             # Loss: use raw logits (matches training, matches MVDet)
             bev_loss = criterion(map_logits, map_gt, map_kernel)
@@ -291,6 +307,7 @@ def evaluate_model(
                 for bi in range(map_logits.shape[0]):
                     pred_maps.append(map_logits[bi, 0].detach().cpu())
                     gt_maps.append(pooled_gt[bi, 0].detach().cpu())
+                    offset_maps.append(offset_preds[bi].detach().cpu())
 
             if batch_idx % log_every == 0:
                 print(
@@ -309,7 +326,7 @@ def evaluate_model(
         "pos_mse": float(np.nanmean(pos_mses)) if pos_mses else float("nan"),
         "aux_pos_mse": float(np.nanmean(aux_pos_mses)) if aux_pos_mses else float("nan"),
     }
-    return metrics, pred_maps, gt_maps
+    return metrics, pred_maps, gt_maps, offset_maps
 
 
 def _extract_points(
@@ -318,6 +335,7 @@ def _extract_points(
     nms_ksize: int,
     max_preds: int,
     min_distance: float = 5.0,
+    offset_map: torch.Tensor | None = None,
 ) -> np.ndarray:
     """Extract detection points from a BEV heatmap using MVDet-style greedy distance NMS.
 
@@ -358,10 +376,17 @@ def _extract_points(
         xs = xs[keep_mask]
         scores = scores[keep_mask]
 
-    ys = ys.cpu().numpy()
-    xs = xs.cpu().numpy()
-    scores = scores.cpu().numpy()
-    return np.stack([ys, xs, scores], axis=1).astype(np.float32)
+    ys_np = ys.cpu().numpy().astype(np.float32)
+    xs_np = xs.cpu().numpy().astype(np.float32)
+    scores_np = scores.cpu().numpy().astype(np.float32)
+
+    if offset_map is not None and ys_np.size > 0:
+        ys_int = ys.long().cpu()
+        xs_int = xs.long().cpu()
+        ys_np = ys_np + offset_map[0, ys_int, xs_int].numpy()
+        xs_np = xs_np + offset_map[1, ys_int, xs_int].numpy()
+
+    return np.stack([ys_np, xs_np, scores_np], axis=1)
 
 
 def _extract_gt_points(heatmap: torch.Tensor, nms_ksize: int) -> np.ndarray:
@@ -409,10 +434,13 @@ def evaluate_detection(
     bev_cell_m: float,
     min_distance: float,
     moda_dist_m: float,
+    offset_maps: Sequence[torch.Tensor] | None = None,
 ) -> Tuple[List[Dict[str, float]], Dict[str, float]]:
     rows: List[Dict[str, float]] = []
     if len(pred_maps) != len(gt_maps):
         raise ValueError("pred_maps and gt_maps must have the same length.")
+    if offset_maps is not None and len(offset_maps) != len(pred_maps):
+        raise ValueError("offset_maps and pred_maps must have the same length.")
 
     for thr in thresholds:
         tp = 0
@@ -421,13 +449,14 @@ def evaluate_detection(
         dist_sum = 0.0
         moda_rows: List[Dict[str, float]] = []
 
-        for pred_map, gt_map in zip(pred_maps, gt_maps):
+        for idx, (pred_map, gt_map) in enumerate(zip(pred_maps, gt_maps)):
             pred_pts = _extract_points(
                 pred_map,
                 thr,
                 nms_ksize=nms_ksize,
                 max_preds=max_preds,
                 min_distance=min_distance,
+                offset_map=offset_maps[idx] if offset_maps is not None else None,
             )
             pred_yx = pred_pts[:, :2] if pred_pts.size else np.empty((0, 2), dtype=np.float32)
 
@@ -504,18 +533,35 @@ def _load_model_weights(model: torch.nn.Module, model_path: Path, device: torch.
         state_dict = payload["model_state_dict"]
     else:
         state_dict = payload
+
     try:
-        model.load_state_dict(state_dict, strict=True)
+        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
     except RuntimeError as exc:
-        msg = str(exc)
-        if "size mismatch for proj_mats" in msg or "size mismatch for bev_head.net.0.weight" in msg:
-            raise RuntimeError(
-                "Checkpoint shape mismatch: training and evaluation model topology differ.\n"
-                "Most common cause: different kept views between train/eval.\n"
-                "Use exactly the same --views/--drop_bad_views/--valid_thr as training.\n"
-                f"Original error:\n{msg}"
-            ) from exc
-        raise
+        raise RuntimeError(
+            "Checkpoint shape mismatch: training and evaluation model topology differ.\n"
+            "Most common cause: different kept views between train/eval.\n"
+            "Use exactly the same --views/--drop_bad_views/--valid_thr as training.\n"
+            f"Original error:\n{exc}"
+        ) from exc
+
+    non_offset_missing = [k for k in missing_keys if not k.startswith("offset_head.")]
+    if non_offset_missing or unexpected_keys:
+        raise RuntimeError(
+            "Checkpoint shape mismatch: training and evaluation model topology differ.\n"
+            "Most common cause: different kept views between train/eval, or a real "
+            "architecture change (not just the offset_head addition).\n"
+            "Use exactly the same --views/--drop_bad_views/--valid_thr as training.\n"
+            f"Missing keys: {non_offset_missing}\n"
+            f"Unexpected keys: {list(unexpected_keys)}"
+        )
+
+    if missing_keys:
+        print(
+            f"[MODEL] WARNING: checkpoint predates offset_head "
+            f"({len(missing_keys)} keys randomly initialized: {missing_keys}). "
+            "Offset refinement will be inaccurate for this checkpoint; "
+            "omit --use_offset or retrain to get calibrated offsets."
+        )
 
 
 def main() -> Dict[str, float]:
@@ -593,7 +639,7 @@ def main() -> Dict[str, float]:
     map_kernel = build_gaussian_kernel_2d(args.map_ksize, args.map_sigma, device=dev)
     img_kernel = build_gaussian_kernel_2d(args.img_ksize, args.img_sigma, device=dev)
 
-    base_metrics, pred_maps, gt_maps = evaluate_model(
+    base_metrics, pred_maps, gt_maps, offset_maps = evaluate_model(
         model=model,
         dataloader=loader,
         device=dev,
@@ -602,6 +648,9 @@ def main() -> Dict[str, float]:
         alpha=args.alpha,
         log_every=args.log_every,
         collect_detection_inputs=args.report_detection,
+        loss_type=args.loss_type,
+        focal_alpha=args.focal_alpha,
+        focal_beta=args.focal_beta,
     )
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -658,6 +707,7 @@ def main() -> Dict[str, float]:
                 bev_cell_m=bev_cell_m,
                 min_distance=nms_r,
                 moda_dist_m=args.det_moda_dist_m,
+                offset_maps=offset_maps if args.use_offset else None,
             )
 
             if len(nms_radii) > 1:

@@ -327,7 +327,7 @@ def main():
 
         # Ours forward
         try:
-            ours_map, ours_img_out = ours_model(ours_imgs)
+            ours_map, ours_offset, ours_img_out = ours_model(ours_imgs)
             print(f"  Ours  map output: shape={tuple(ours_map.shape)}, "
                   f"min={ours_map.min().item():.6f}, max={ours_map.max().item():.6f}, "
                   f"mean={ours_map.mean().item():.6f}, std={ours_map.std().item():.6f}")

@@ -69,6 +69,10 @@ DEFAULT_MAP_KSIZE = 41                 # BEV 热图高斯核大小（MVDet: 41�
 DEFAULT_MAP_SIGMA = 2.2361             # MVDet: cov=I*5.0 → variance=5.0 → sigma=sqrt(5)≈2.2361
 DEFAULT_IMG_KSIZE = 21                 # 图像热图高斯核大小（MVDet: 21）
 DEFAULT_IMG_SIGMA = 1.5811             # MVDet: cov=I*2.5 → variance=2.5 → sigma=sqrt(2.5)≈1.5811
+DEFAULT_LOSS_TYPE = "mse"              # "mse" (MVDet baseline) | "focal" (CenterNet-style)
+DEFAULT_FOCAL_ALPHA = 2.0              # focal loss 难例聚焦强度
+DEFAULT_FOCAL_BETA = 4.0               # focal loss 负样本惩罚衰减强度
+DEFAULT_OFFSET_WEIGHT = 1.0            # offset 回归 L1 loss 权重
 
 # 优化器（MVDet 默认：SGD lr=0.1 + OneCycleLR）
 DEFAULT_OPTIMIZER = "sgd"

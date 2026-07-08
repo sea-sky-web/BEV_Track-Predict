@@ -51,6 +51,10 @@ class MVDetTrainer:
         bev_neg_weight: float = 1.0,
         img_pos_weight: float = 1.0,
         img_neg_weight: float = 1.0,
+        loss_type: str = "mse",
+        focal_alpha: float = 2.0,
+        focal_beta: float = 4.0,
+        offset_weight: float = 1.0,
     ):
         """
         初始化训练器
@@ -85,11 +89,14 @@ class MVDetTrainer:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # 损失函数：默认权重 1.0 保持原 GaussianMSE 行为。
+        # 损失函数
         self.bev_criterion = create_loss_criterion(
             weighted=(bev_pos_weight != 1.0 or bev_neg_weight != 1.0),
             pos_weight=bev_pos_weight,
             neg_weight=bev_neg_weight,
+            loss_type=loss_type,
+            focal_alpha=focal_alpha,
+            focal_beta=focal_beta,
         )
         self.img_criterion = create_loss_criterion(
             weighted=(img_pos_weight != 1.0 or img_neg_weight != 1.0),
@@ -97,6 +104,7 @@ class MVDetTrainer:
             neg_weight=img_neg_weight,
         )
         self.criterion = self.bev_criterion
+        self.offset_weight = offset_weight
         
         # AMP 梯度缩放器
         self.scaler = torch.amp.GradScaler(
@@ -200,10 +208,19 @@ class MVDetTrainer:
             
             # 前向传播
             with torch.amp.autocast("cuda", enabled=self.amp_enabled):
-                map_logits, imgs_logits = self.model(x_views)
+                map_logits, offset_preds, imgs_logits = self.model(x_views)
                 
-                # MVDet: loss 直接在 raw logits 上计算，不经过 sigmoid
                 bev_loss = self.bev_criterion(map_logits, map_gt, map_kernel)
+                
+                # Offset L1 loss（仅在 GT 正样本位置计算）
+                B, C, H, W = map_logits.shape
+                pooled_gt_for_offset = F.adaptive_max_pool2d(map_gt, output_size=(H, W))
+                pos_mask_offset = pooled_gt_for_offset.squeeze(1) > 0.5  # (B, H, W)
+                offset_loss = torch.tensor(0.0, device=self.device)
+                if pos_mask_offset.any():
+                    gt_offset = torch.zeros_like(offset_preds)
+                    offset_at_pos = offset_preds[:, :, pos_mask_offset.squeeze(0) if B == 1 else pos_mask_offset]
+                    offset_loss = F.l1_loss(offset_at_pos, gt_offset[:, :, pos_mask_offset.squeeze(0) if B == 1 else pos_mask_offset])
                 
                 per_view_loss = 0.0
                 for vi in range(imgs_logits.shape[1]):
@@ -214,7 +231,7 @@ class MVDetTrainer:
                     )
                 per_view_loss = per_view_loss / float(imgs_logits.shape[1])
                 
-                loss = bev_loss + alpha * per_view_loss
+                loss = bev_loss + self.offset_weight * offset_loss + alpha * per_view_loss
             
             if not torch.isfinite(loss):
                 if batch_idx % log_every == 0:
@@ -350,7 +367,7 @@ class MVDetTrainer:
                 map_gt = map_gt.to(self.device, non_blocking=True)
                 imgs_gt = imgs_gt.to(self.device, non_blocking=True)
                 
-                map_logits, imgs_logits = self.model(x_views)
+                map_logits, _offset_preds, imgs_logits = self.model(x_views)
                 
                 bev_loss = self.bev_criterion(map_logits, map_gt, map_kernel)
                 

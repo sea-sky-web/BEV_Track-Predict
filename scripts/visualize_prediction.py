@@ -90,7 +90,7 @@ def render_frame(model, ds, dev, frame_idx):
     x_views = x_views.unsqueeze(0).to(dev)
 
     with torch.no_grad():
-        map_logits, _ = model(x_views)
+        map_logits, _offset, _ = model(x_views)
 
     pred = map_logits[0, 0].cpu().numpy()
     gt = F.adaptive_max_pool2d(map_gt.unsqueeze(0), output_size=map_logits.shape[-2:])[0, 0].numpy()
@@ -137,7 +137,7 @@ def visualize_single(model, ds, dev, frame_idx, output_dir):
     x_views = x_views.unsqueeze(0).to(dev)
 
     with torch.no_grad():
-        map_logits, _ = model(x_views)
+        map_logits, _offset, _ = model(x_views)
 
     pred = map_logits[0, 0].cpu().numpy()
     gt = F.adaptive_max_pool2d(map_gt.unsqueeze(0), output_size=map_logits.shape[-2:])[0, 0].numpy()

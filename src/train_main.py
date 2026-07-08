@@ -17,6 +17,7 @@ from config import (
     DEFAULT_BACKBONE, DEFAULT_BEV_DOWN, DEFAULT_FEAT_H, DEFAULT_FEAT_W,
     DEFAULT_IMG_H, DEFAULT_IMG_W, DEFAULT_PERSON_H,
     DEFAULT_ALPHA, DEFAULT_BEV_POS_WEIGHT, DEFAULT_BEV_NEG_WEIGHT,
+    DEFAULT_LOSS_TYPE, DEFAULT_FOCAL_ALPHA, DEFAULT_FOCAL_BETA, DEFAULT_OFFSET_WEIGHT,
     DEFAULT_MAP_KSIZE, DEFAULT_MAP_SIGMA,
     DEFAULT_IMG_KSIZE, DEFAULT_IMG_SIGMA, DEFAULT_PRETRAINED,
     DEFAULT_FREEZE_BN, DEFAULT_AMP_ENABLED, DEFAULT_DEVICE,
@@ -100,6 +101,15 @@ def parse_args():
                     help="BEV 热图正样本 Gaussian MSE 权重")
     ap.add_argument("--bev_neg_weight", type=float, default=DEFAULT_BEV_NEG_WEIGHT,
                     help="BEV 热图负样本 Gaussian MSE 权重")
+    ap.add_argument("--loss_type", type=str, default=DEFAULT_LOSS_TYPE,
+                    choices=["mse", "focal"],
+                    help="BEV loss 类型：mse (MVDet baseline) 或 focal (CenterNet-style)")
+    ap.add_argument("--focal_alpha", type=float, default=DEFAULT_FOCAL_ALPHA,
+                    help="Focal loss 难例聚焦强度")
+    ap.add_argument("--focal_beta", type=float, default=DEFAULT_FOCAL_BETA,
+                    help="Focal loss 负样本惩罚衰减强度")
+    ap.add_argument("--offset_weight", type=float, default=DEFAULT_OFFSET_WEIGHT,
+                    help="Offset 回归 L1 loss 权重")
     ap.add_argument("--img_pos_weight", type=float, default=1.0,
                     help="图像热图正样本 Gaussian MSE 权重")
     ap.add_argument("--img_neg_weight", type=float, default=1.0,
@@ -354,6 +364,10 @@ def main():
         bev_neg_weight=args.bev_neg_weight,
         img_pos_weight=args.img_pos_weight,
         img_neg_weight=args.img_neg_weight,
+        loss_type=args.loss_type,
+        focal_alpha=args.focal_alpha,
+        focal_beta=args.focal_beta,
+        offset_weight=args.offset_weight,
     )
     print(
         "[OPT] "

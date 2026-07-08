@@ -161,24 +161,60 @@ class WeightedGaussianMSE(nn.Module):
 def create_loss_criterion(
     weighted: bool = False,
     pos_weight: float = 1.0,
-    neg_weight: float = 1.0
+    neg_weight: float = 1.0,
+    loss_type: str = "mse",
+    focal_alpha: float = 2.0,
+    focal_beta: float = 4.0,
 ) -> nn.Module:
-    """
-    工厂函数：创建损失函数
-    
-    Args:
-        weighted: 是否使用带权重的损失
-        pos_weight: 正样本权重（仅当 weighted=True 时有效）
-        neg_weight: 负样本权重（仅当 weighted=True 时有效）
-        
-    Returns:
-        nn.Module: 损失函数实例
-        
-    Example:
-        >>> criterion = create_loss_criterion(weighted=False)
-        >>> criterion = create_loss_criterion(weighted=True, pos_weight=2.0, neg_weight=1.0)
-    """
+    if loss_type == "focal":
+        return PenaltyReducedFocalLoss(alpha=focal_alpha, beta=focal_beta)
     if weighted:
         return WeightedGaussianMSE(pos_weight=pos_weight, neg_weight=neg_weight)
-    else:
-        return GaussianMSE()
+    return GaussianMSE()
+
+
+class PenaltyReducedFocalLoss(nn.Module):
+    """CenterNet-style penalty-reduced focal loss for heatmap regression.
+
+    Reference: Law & Deng, "CornerNet" (arXiv 1808.01244), Section 3.
+    Used by all modern multi-view detectors (QMVDet, EarlyBird, PVH, MSMVD).
+
+    For positive locations (smoothed GT == 1):
+        L = -(1 - p)^alpha * log(p)
+    For negative locations (smoothed GT < 1):
+        L = -(1 - Y)^beta * p^alpha * log(1 - p)
+    where p = sigmoid(pred_logits), Y = smoothed GT.
+    """
+
+    def __init__(self, alpha: float = 2.0, beta: float = 4.0):
+        super().__init__()
+        self.alpha = alpha
+        self.beta = beta
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        kernel: torch.Tensor,
+    ) -> torch.Tensor:
+        B, C, H, W = pred.shape
+
+        target = F.adaptive_max_pool2d(target, output_size=(H, W))
+        tgt = target.reshape(B * C, 1, H, W)
+        k = kernel.to(dtype=tgt.dtype, device=tgt.device)
+        pad = (k.shape[-1] - 1) // 2
+        tgt = F.conv2d(tgt, k, padding=pad)
+        tgt = tgt.reshape(B, C, H, W)
+
+        p = torch.sigmoid(pred)
+        p = p.clamp(1e-6, 1.0 - 1e-6)
+
+        pos_mask = tgt.eq(1.0)
+        neg_mask = ~pos_mask
+
+        pos_loss = -((1.0 - p) ** self.alpha) * torch.log(p)
+        neg_loss = -((1.0 - tgt) ** self.beta) * (p ** self.alpha) * torch.log(1.0 - p)
+
+        loss = torch.where(pos_mask, pos_loss, neg_loss)
+        num_pos = pos_mask.float().sum().clamp_min(1.0)
+        return loss.sum() / num_pos
