@@ -13,7 +13,7 @@ from torchvision.models import ResNet18_Weights, ResNet50_Weights, resnet18, res
 from geometry import warp_perspective_torch
 
 BackboneName = Literal["resnet18", "resnet50"]
-FusionMode = Literal["concat", "confidence", "confidence_v1", "confidence_v2"]
+FusionMode = Literal["concat", "confidence", "confidence_v1", "confidence_v2", "geo_confidence_v1"]
 
 
 def normalize_fusion_mode(fusion_mode: str) -> str:
@@ -323,6 +323,48 @@ class ConcatAttentionFusion(nn.Module):
         return (feats_bev * weights.unsqueeze(2)).sum(dim=1)
 
 
+class GeoConfidenceFusion(nn.Module):
+    """Geometry-reliability prompted fusion.
+
+    Extends ConcatAttentionFusion with a static geometry prior derived from
+    camera projection metadata (valid mask, border margin, coverage count).
+    """
+
+    def __init__(self, num_views: int, feat_ch: int, geo_ch: int = 3):
+        super().__init__()
+        self.num_views = num_views
+        self.joint_compress = nn.Sequential(
+            nn.Conv2d(num_views * feat_ch, feat_ch, 1),
+            nn.ReLU(inplace=True),
+        )
+        self.feature_weight_head = nn.Conv2d(feat_ch, num_views, 1)
+        self.geo_score_net = nn.Conv2d(geo_ch, 1, 1)
+        self.beta = nn.Parameter(torch.tensor(1.0))
+        self.latest_weights = None
+
+    def forward(
+        self,
+        feats_bev: torch.Tensor,
+        geo_meta: torch.Tensor,
+    ) -> torch.Tensor:
+        b, v, c, h, w = feats_bev.shape
+
+        joint = feats_bev.reshape(b, v * c, h, w)
+        joint = self.joint_compress(joint)
+        feature_scores = self.feature_weight_head(joint)  # (B, V, H, W)
+
+        geo_scores = torch.stack(
+            [self.geo_score_net(geo_meta[vi:vi+1]).squeeze(0) for vi in range(v)],
+            dim=0,
+        ).squeeze(1).unsqueeze(0)  # (1, V, H, W)
+
+        combined = feature_scores + self.beta * geo_scores
+        weights = torch.softmax(combined, dim=1)
+        self.latest_weights = weights.detach()
+
+        return (feats_bev * weights.unsqueeze(2)).sum(dim=1)
+
+
 class MVDetLikeNet(nn.Module):
     """
     MVDet 风格的多视角 BEV 检测网络
@@ -373,7 +415,7 @@ class MVDetLikeNet(nn.Module):
         """
         super().__init__()
         fusion_mode = normalize_fusion_mode(fusion_mode)
-        if fusion_mode not in {"concat", "confidence_v1", "confidence_v2"}:
+        if fusion_mode not in {"concat", "confidence_v1", "confidence_v2", "geo_confidence_v1"}:
             raise ValueError(f"Unsupported fusion_mode: {fusion_mode}")
         if backbone not in {"resnet18", "resnet50"}:
             raise ValueError(f"Unsupported backbone: {backbone}")
@@ -396,6 +438,18 @@ class MVDetLikeNet(nn.Module):
         
         # 投影矩阵（静态 buffer，不参与优化）
         self.register_buffer("proj_mats", proj_mats.detach().clone())
+
+        # 静态几何元数据（仅 geo_confidence 融合模式使用）
+        if fusion_mode == "geo_confidence_v1":
+            from geometry import compute_bev_geometry_metadata
+            geo_meta = compute_bev_geometry_metadata(
+                proj_mats=proj_mats,
+                src_hw=(self.Hf, self.Wf),
+                dst_hw=(self.Hb, self.Wb),
+            )
+            self.register_buffer("geo_meta", geo_meta)
+        else:
+            self.geo_meta = None
         
         # 计算 BEV 融合特征的输入通道数
         if fusion_mode == "concat":
@@ -404,6 +458,11 @@ class MVDetLikeNet(nn.Module):
         elif fusion_mode == "confidence_v1":
             in_bev = feat_ch
             self.confidence_fusion = SpatialAwareConfidenceFusion(feat_ch=feat_ch)
+        elif fusion_mode == "geo_confidence_v1":
+            in_bev = feat_ch
+            self.confidence_fusion = GeoConfidenceFusion(
+                num_views=num_views, feat_ch=feat_ch, geo_ch=3,
+            )
         else:
             in_bev = feat_ch
             self.confidence_fusion = ConcatAttentionFusion(num_views=num_views, feat_ch=feat_ch)
@@ -484,7 +543,10 @@ class MVDetLikeNet(nn.Module):
             bev_fused = torch.cat(feats_bev, dim=1)  # (B, V*feat_ch, Hb, Wb)
         else:
             bev_stack = torch.stack(feats_bev, dim=1)  # (B, V, feat_ch, Hb, Wb)
-            bev_fused = self.confidence_fusion(bev_stack)  # (B, feat_ch, Hb, Wb)
+            if self.geo_meta is not None:
+                bev_fused = self.confidence_fusion(bev_stack, self.geo_meta)
+            else:
+                bev_fused = self.confidence_fusion(bev_stack)  # (B, feat_ch, Hb, Wb)
         
         # 添加坐标编码
         if self.add_coord:

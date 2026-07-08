@@ -96,7 +96,7 @@ def parse_args() -> argparse.Namespace:
         "--fusion_mode",
         type=str,
         default=os.environ.get("FUSION_MODE", DEFAULT_FUSION_MODE),
-        choices=["concat", "confidence", "confidence_v1", "confidence_v2"],
+        choices=["concat", "confidence", "confidence_v1", "confidence_v2", "geo_confidence_v1"],
         help="BEV fusion mode used by the checkpoint.",
     )
 

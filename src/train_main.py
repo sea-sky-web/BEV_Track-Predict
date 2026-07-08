@@ -89,7 +89,7 @@ def parse_args():
     ap.add_argument("--img_w", type=int, default=DEFAULT_IMG_W,
                     help="输入图像宽度")
     ap.add_argument("--fusion_mode", type=str, default=os.environ.get("FUSION_MODE", DEFAULT_FUSION_MODE),
-                    choices=["concat", "confidence", "confidence_v1", "confidence_v2"],
+                    choices=["concat", "confidence", "confidence_v1", "confidence_v2", "geo_confidence_v1"],
                     help="BEV 融合模式：concat、legacy confidence_v1 或 joint attention confidence_v2")
     
     # 人体模型和损失
