@@ -205,11 +205,14 @@ class PenaltyReducedFocalLoss(nn.Module):
         pad = (k.shape[-1] - 1) // 2
         tgt = F.conv2d(tgt, k, padding=pad)
         tgt = tgt.reshape(B, C, H, W)
+        # Clamp to [0,1]: overlapping Gaussians from nearby pedestrians can sum > 1.0
+        tgt = tgt.clamp(max=1.0)
 
         p = torch.sigmoid(pred)
         p = p.clamp(1e-6, 1.0 - 1e-6)
 
-        pos_mask = tgt.eq(1.0)
+        # ge(1-eps) instead of eq(1.0): conv2d floating point rarely produces exact 1.0
+        pos_mask = tgt.ge(1.0 - 1e-4)
         neg_mask = ~pos_mask
 
         pos_loss = -((1.0 - p) ** self.alpha) * torch.log(p)
