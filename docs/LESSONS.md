@@ -170,3 +170,61 @@
 - [ ] ExitPlanMode 已通过？→ 进入评审，不是进入实现
 - [ ] 用户给出实质性评审意见？→ 才可开始写代码
 - [ ] 用户只说"可以/同意"？→ 追问一个验证问题确认理解
+
+---
+
+## 9. workflow_dispatch 的 `--ref` 只决定 checkout，不决定 Colab 侧代码
+
+**教训来源**：07-09 Run B（focal loss，`--ref fix/focal-loss-pos-mask`）复现了未修复前的爆炸行为，尽管 GA runner 已 checkout 到含修复的分支。
+
+**根因**：`scripts/colab_train.py` 在 Colab session 内部执行 `git clone https://github.com/.../BEV_Track-Predict.git`，**只 clone 默认分支（main）**，不会 checkout 到触发 workflow 时指定的 `--ref`。GA runner 上的代码状态和 Colab 上实际执行的代码状态是两个独立的 git 副本。
+
+**规则**：
+- 任何要在 Colab 上验证的修复，必须先合并到 `main`，再触发 workflow
+- 不要假设 `gh workflow run --ref <branch>` 能让 Colab 侧跑到该分支的代码
+- 触发前检查：`git log --oneline main -1` 确认修复已在 main HEAD
+
+**检查清单**：
+- [ ] 修复代码是否已合并到 main？
+- [ ] 如果只是分支验证，会不会在 Colab 侧被 `git clone` 默认分支覆盖？
+
+---
+
+## 10. 归一化方式不同的 loss 换算前必须做梯度量级实证
+
+**教训来源**：07-09/07-10 Run B / Run BB，focal loss（`PenaltyReducedFocalLoss`）从 epoch 0 起完全爆炸（loss 卡在 13.82，raw_pos_mse ~10¹⁹-10²⁰），即使 pos_mask 的 `eq(1.0)` bug（PR #84）已修复。
+
+**根因**：
+1. `pos_mask = tgt.eq(1.0)` 在 `F.conv2d` 模糊后几乎永远不命中（浮点精度）+ 邻近行人高斯核叠加可超过 1.0 → PR #84 已修复（`clamp(max=1.0)` + `ge(1.0-1e-4)`）
+2. **更根本的问题**：focal loss 用 `loss.sum() / num_pos`（num_pos ~20-40 像素）归一化，MSE 用 `mean()`（÷43200 像素）归一化。本地实证测得两者梯度相差 **300-3600 倍**。CenterNet 原始配置搭配 Adam lr=1.25e-4，我们用 SGD lr=0.1（差 ~800 倍）
+
+**规则**：
+- 引入任何新 loss 函数前，**必须**先用相同随机种子/相同输入本地跑一次前向+反向，比较 `loss.item()`、`grad.norm()`、`grad.abs().max()` 与现有 baseline loss 的量级差异
+- 如果差异超过 10 倍，lr 和 optimizer 大概率需要独立调整，不能直接复用现有训练配置
+- CenterNet 类 loss 论文中的超参（lr, optimizer）是和其归一化方式配套设计的，不能只抄 loss 公式，丢弃配套的优化器设置
+
+**验证方法**：
+```python
+pred = torch.randn(...) * 0.01  # 模拟接近 0 的初始 logits
+loss_a = criterion_a(pred.clone().requires_grad_(), target, kernel); loss_a.backward()
+loss_b = criterion_b(pred.clone().requires_grad_(), target, kernel); loss_b.backward()
+# 比较 grad.norm(), grad.abs().max()
+```
+
+---
+
+## B7. Focal Loss pos_mask eq(1.0) bug 修复 (07-09, PR #84)
+
+- **假设**：`pos_mask = tgt.eq(1.0)` 在高斯模糊后的 GT 上匹配 0 个像素，导致 `num_pos` clamp 到 1，梯度爆炸
+- **实验**：本地构造模拟 GT，验证 `eq(1.0)` 匹配数 = 0（含近邻行人叠加导致 max=1.905 > 1.0）
+- **修复**：`tgt.clamp(max=1.0)` + `pos_mask = tgt.ge(1.0 - 1e-4)`
+- **结果**：修复后每个行人产生 ~11 个正样本像素（本地验证），17/17 单元测试通过
+- **Colab 验证**：Run BB (29083224880) 仍然爆炸 → 证明这不是唯一根因，见 B8
+
+## B8. Focal Loss 梯度量级 300-3600x 于 MSE (07-10, PR #85 待批准)
+
+- **假设**：即使 pos_mask 修复，`sum()/num_pos` 归一化产生的梯度量级和 SGD lr=0.1 不匹配
+- **实验**：本地相同随机种子对比 MSE vs Focal 前向+反向：loss 比 49144x，grad_norm 比 3674x，grad_max 比 334x
+- **结论**：CenterNet 用 Adam lr=1.25e-4 搭配此归一化；我们用 SGD lr=0.1，相差 ~800x，与实测梯度比量级吻合
+- **修复方案**：PR #85 给 workflow 加 `lr_init` 参数入口（默认 0.1 不影响 MSE baseline），后续用 `lr_init=0.001` 重跑验证
+- **待验证**：Colab 训练 run（需用户批准后触发）

@@ -1,19 +1,19 @@
 # Active Plan — 当前迭代
 
 > 每轮覆盖此文件。上一轮结果归入 daily-log.md。
-> 最后更新：2026-07-08
+> 最后更新：2026-07-10
 
 ## 当前状态
 
 | 指标 | 值 | 目标 |
 |---|:---:|:---:|
 | MODA (best) | 0.857 | ≥ 0.882 |
-| MODA (pipeline验证) | 0.849 | — |
-| Precision | 0.918 | — |
-| Recall | 0.889 | — |
-| F1 | 0.903 | — |
-| 最优 NMS | 6.0 | — |
-| 最优阈值 | 0.400 | — |
+| MODA (回归检查, Run A) | 0.854 | — |
+| Precision | 0.927 | — |
+| Recall | 0.895 | — |
+| F1 | 0.911 | — |
+| 最优 NMS | 6.0-7.0（训练随机性范围） | — |
+| 最优阈值 | 0.325-0.40（训练随机性范围） | — |
 
 **阶段**：第二阶段 — 在现有基线上创新超越 MVDet
 
@@ -21,20 +21,26 @@
 
 **目的**：通过隔离实验验证两个改进的独立贡献。
 
-### 代码状态
-`feat/focal-loss-offset-head` 分支已完成，代码已通过用户审阅，尚未合并。
-消融实验通过 CLI 参数隔离：
+### 进度
 
-| Run | loss_type | offset_weight | use_offset | 隔离的变量 |
-|---|---|---|---|---|
-| A（回归检查） | mse | 0.0 | false | 无变化，验证代码重构无副作用 |
-| B | focal | 0.0 | false | 只有 focal loss |
-| C | mse | 1.0 | true | 只有 offset head |
-| D（可选） | focal | 1.0 | true | 组合 |
+| Run | loss_type | offset_weight | lr_init | 状态 | MODA |
+|---|---|---|---|---|---|
+| A（回归检查） | mse | 0.0 | 0.1 | ✅ 完成 | 0.854（正常范围） |
+| B（focal only, 首次） | focal | 0.0 | 0.1 | ❌ 爆炸 | N/A |
+| BB（focal only, 修复重跑） | focal | 0.0 | 0.1 | ❌ 仍爆炸 | N/A |
+| C | mse | 1.0 | 0.1 | ⏸ 未开始 | — |
+| D（可选） | focal | 1.0 | ? | ⏸ 未开始 | — |
 
-### Pending
-- run 28866188056（checkpoint 周期性下载验证，T4）仍在进行中
-- A/B/C 三个消融实验需要等 28866188056 完成后依次触发（共用 Colab session 名）
+### Focal Loss 爆炸诊断（两轮根因）
+
+1. **pos_mask bug**（PR #84，已合并）：`tgt.eq(1.0)` 在高斯模糊后几乎不命中 → 修复为 `clamp(max=1.0)` + `ge(1.0-1e-4)`
+2. **梯度量级不匹配**（PR #85，待批准合并）：本地实测 focal loss 梯度比 MSE 大 300-3674 倍（`sum()/num_pos` vs `mean()` 归一化差异），SGD lr=0.1 对 focal loss 不安全。CenterNet 原配置 Adam lr=1.25e-4，与我们配置相差 ~800x，量级吻合
+
+### Pending（需用户批准后触发）
+
+- 合并 PR #85 后，用 `--lr_init 0.001` 重跑 focal loss（Run BBB）
+- Run BBB 成功后再排 Run C（offset head）
+- 消融实验完成后决定是否做 Run D（组合）
 
 ## 当前训练配置（baseline）
 
@@ -50,12 +56,13 @@ amp: false
 bev_pos_weight: 1.0
 NMS: det_min_distance=6.0 (reduced grid cells, 0.6m physical)
 MODA matching: 0.5m (Hungarian)
-loss_type: mse (baseline) / focal (实验)
+loss_type: mse (baseline) / focal (实验, 需 lr_init 单独调低)
 ```
 
 ## 下一步
 
-1. 等 28866188056 完成 → 验证 checkpoint 下载成功
-2. 合并 focal-loss-offset-head 分支
-3. 依次触发 A/B/C 消融实验
-4. 根据结果决定是否做 D（组合）
+1. 等待用户批准合并 PR #85
+2. 用户批准后触发 Run BBB：`loss_type=focal, offset_weight=0.0, lr_init=0.001`
+3. Run BBB 成功（loss 正常下降）→ 继续 Run C（offset head）
+4. 消融完成后决定是否做 Run D（组合）
+5. 待办：FN 空间分布分析，定位 0.854→0.882 差距的 28 个漏检来源（遮挡/覆盖弱区域/训练不足）

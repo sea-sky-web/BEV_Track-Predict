@@ -6,6 +6,59 @@
 
 ---
 
+## 2026-07-09 ~ 07-10
+
+### 进展
+- Run A（回归检查）：`loss_type=mse, offset_weight=0.0`，验证 focal/offset 代码合入无副作用
+- Run B（focal loss only, 首次）：训练从 epoch 0 起爆炸
+- 诊断根因 1：`PenaltyReducedFocalLoss.pos_mask = tgt.eq(1.0)` 在 `F.conv2d` 模糊后匹配 0 个像素（浮点精度）+ 邻近行人高斯核叠加可 >1.0
+- PR #84：修复为 `clamp(max=1.0)` + `ge(1.0-1e-4)`，本地验证正样本像素数从 0 恢复正常，17/17 单测通过
+- Run BB（重跑，基于 main 含 PR #84）：**仍然爆炸**
+- 诊断根因 2：本地量化梯度对比，focal loss 梯度比 MSE 大 **300-3674 倍**（`sum()/num_pos` vs `mean()` 归一化差异），SGD lr=0.1 对 focal loss 不安全
+- PR #85：给 workflow 新增 `lr_init` 参数入口（默认 0.1，不影响 MSE baseline），为后续 `lr_init=0.001` 重跑做准备
+- 发现并记录 workflow 基础设施问题：`workflow_dispatch --ref <branch>` 只决定 GA runner 侧 checkout，Colab 侧 `colab_train.py` 执行 `git clone` 默认分支（main）—— 验证任何分支上的修复前必须先合并到 main
+
+### Run A 结果（28992991995）
+
+| 指标 | 值 | vs baseline (28866188056) |
+|---|:-:|:-:|
+| MODA | 0.854 | 0.850（训练随机性范围内） |
+| Precision | 0.927 | 0.919 |
+| Recall | 0.895 | 0.908 |
+| F1 | 0.911 | 0.913 |
+| TP/FP/FN | 866/53/86 | 862/53/90 |
+
+回归检查通过：focal/offset 代码合入不影响 MSE baseline。
+
+### Run B / Run BB 梯度爆炸数据
+
+| Run | pos_mask 修复 | Epoch 0 loss | raw_pos_mse | SNR |
+|---|:-:|:-:|:-:|:-:|
+| B (29004627977) | 无 | 16.13 | ~10²⁰ | -2×10¹⁰ |
+| BB (29083224880) | 有（PR #84） | 14.56 | 4.6×10¹⁹ | -1.6×10⁹ |
+
+两者爆炸模式一致，证明 pos_mask 不是唯一根因。BB 在 epoch 7 因 `colab exec --timeout 7200` 超时终止，无完整 10 epoch 结果。
+
+### 本地梯度量级实证（关键诊断）
+
+相同随机种子、相同模拟 GT，对比 MSE vs Focal loss 前向+反向：
+
+| | MSE | Focal | 倍率 |
+|---|:-:|:-:|:-:|
+| loss | 0.007 | 363.2 | 49144x |
+| grad_norm | 0.0008 | 3.04 | 3674x |
+| grad_max | 0.00005 | 0.016 | 334x |
+
+CenterNet 原始配置：Adam lr=1.25e-4。我们的配置：SGD lr=0.1（差 ~800x），量级与实测梯度比吻合。
+
+### 待解决
+- [ ] PR #85 待批准合并
+- [ ] 用 `lr_init=0.001` 重跑 focal loss 消融（需用户批准触发）
+- [ ] Run C（offset head only）尚未开始，等 focal loss 稳定后再排期
+- [ ] FN 空间分布分析：当前 vs MVDet 差距（0.854 vs 0.882）全部来自 FN 多 28 个，尚未定位漏检的空间/覆盖模式
+
+---
+
 ## 2026-07-06
 
 ### 进展
@@ -224,4 +277,7 @@ MVDet 论文报告 0.882（MATLAB eval）；MVDet 代码自带的 Python eval �
 | 07-07 | Pipeline 验证通过（backbone dilation 对齐，MODA 0.849 在合理范围） | 0.849 |
 | 07-07 | 文档体系重构 + 全局规则落盘 + checkpoint 周期性下载方案 | — |
 | 07-07 | 正式进入第二阶段：创新超越 MVDet | — |
+| 07-09 | Run A 回归检查通过（MODA 0.854），Run B focal loss 首次爆炸 | — |
+| 07-09 | 诊断 focal loss pos_mask eq(1.0) bug，PR #84 修复 | — |
+| 07-10 | Run BB 重跑仍爆炸；本地实证确认梯度量级差 300-3674x；PR #85 加 lr_init 参数入口 | — |
 | **目标** | **超越 MVDet 基线** | **≥ 0.882** |
