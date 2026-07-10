@@ -27,6 +27,10 @@ on:
         description: 'Offset 回归 L1 loss 权重（0.0 = 禁用 offset loss）'
         default: '0.0'
         required: false
+      lr_init:
+        description: '初始学习率（MSE baseline=0.1；focal loss 梯度比 MSE 大 300-3600 倍，推荐 0.001）'
+        default: '0.1'
+        required: false
       checkpoint_run:
         description: 'eval-only: 从指定 GA run ID 下载 checkpoint（配合 epochs=0）'
         default: ''
@@ -151,7 +155,7 @@ jobs:
         continue-on-error: true
         run: |
           {
-            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}', '--loss_type', '${{ inputs.loss_type }}', '--offset_weight', '${{ inputs.offset_weight }}']"
+            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}', '--loss_type', '${{ inputs.loss_type }}', '--offset_weight', '${{ inputs.offset_weight }}', '--lr_init', '${{ inputs.lr_init }}']"
             cat scripts/colab_train.py
           } | colab exec -s bev-train --timeout 7200 > train_exec.log 2>&1 &
           EXEC_PID=$!

@@ -59,6 +59,10 @@ parser.add_argument("--loss_type", default="mse", choices=["mse", "focal"],
                     help="BEV loss: mse (MVDet baseline) or focal (CenterNet-style)")
 parser.add_argument("--offset_weight", type=float, default=0.0,
                     help="Offset L1 loss weight (0.0 = disable offset training)")
+parser.add_argument("--lr_init", type=float, default=0.1,
+                    help="Initial LR (MSE baseline: 0.1. Focal loss gradients are "
+                         "~300-3600x larger than MSE at this lr due to sum/num_pos "
+                         "normalization; use ~0.001 for loss_type=focal)")
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
@@ -187,7 +191,7 @@ if args.epochs > 0:
     "--alpha",                  "1.0",
     "--optimizer",              "sgd",
     "--scheduler",              "onecycle",
-    "--lr_init",                "0.1",
+    "--lr_init",                str(args.lr_init),
     "--max_frames",             str(min(args.max_frames, 360) if args.max_frames > 0 else 360),
     "--weight_decay",           "0.0005",
     "--freeze_backbone_epochs", "0",
