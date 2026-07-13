@@ -59,6 +59,9 @@ parser.add_argument("--loss_type", default="mse", choices=["mse", "focal"],
                     help="BEV loss: mse (MVDet baseline) or focal (CenterNet-style)")
 parser.add_argument("--offset_weight", type=float, default=0.0,
                     help="Offset L1 loss weight (0.0 = disable offset training)")
+parser.add_argument("--fusion_mode", default="confidence_v2",
+                    choices=["concat", "confidence_v1", "confidence_v2", "geo_confidence_v1"],
+                    help="BEV fusion mode (baseline = confidence_v2)")
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
@@ -182,7 +185,7 @@ if args.epochs > 0:
     "--batch",                  "1",
     "--pretrained",             "true",
     "--backbone",               "resnet18",
-    "--fusion_mode",            "concat",
+    "--fusion_mode",            args.fusion_mode,
     "--augment",                "false",
     "--alpha",                  "1.0",
     "--optimizer",              "sgd",
@@ -221,7 +224,7 @@ eval_cmd = [
     "--report_detection",
     "--metrics_out",     str(eval_out),
     "--views",           "0,1,2,3,4,5,6",
-    "--fusion_mode",     "concat",
+    "--fusion_mode",     args.fusion_mode,
     "--backbone",        "resnet18",
     "--frame_start",     "360",    # MVDet test split: last 10% (frames 360-399 of 400 annotations)
     "--max_frames",      "40",

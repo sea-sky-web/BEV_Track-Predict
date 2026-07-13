@@ -35,3 +35,7 @@ training_log.txt
 # Colab automation local runtime artifacts
 colab_automation/.env
 colab_automation/runtime/
+-e 
+# Session files
+.remember/
+.claude/
