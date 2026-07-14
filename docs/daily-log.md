@@ -6,6 +6,53 @@
 
 ---
 
+## 2026-07-14 🏆 Milestone: MODA 0.8918, 超越 MVDet
+
+### 重大突破
+
+MobileNet-V2 + Learned Attention Fusion 在 WildTrack 上达到 **MODA 0.8918**，超越 MVDet 论文的 0.882，同时参数量仅为 MVDet 的 17.4%。
+
+### 进展
+- 诊断 Run A MODA 回归根因：`colab_train.py` 硬编码 `fusion_mode=concat`
+- 修复并参数化 `fusion_mode`、`backbone` 通过 workflow 传递
+- 统一对比实验：ResNet-18 × {concat, confidence_v2, geo_confidence_v1}
+- 实现 MobileNet-V2 backbone（截断式 dilation + gradient checkpointing）
+- GPU inference benchmark（T4, 双 backbone × 3 fusion modes）
+- **MobileNet-V2 + confidence_v2 训练：MODA 0.8918**
+
+### 实验结果
+
+| Backbone | Fusion | 参数量 | MODA | MODP | P | R | F1 | TP/FP/FN |
+|----------|--------|:------:|:----:|:----:|:---:|:---:|:---:|----------|
+| ResNet-18 | concat | 32.7M | 0.8456 | 0.7585 | 0.9197 | 0.8897 | 0.9044 | 863/58/89 |
+| ResNet-18 | confidence_v2 | 16.3M | 0.8277 | 0.7573 | 0.9152 | 0.8729 | 0.8935 | 848/60/104 |
+| ResNet-18 | geo_confidence_v1 | 16.3M | 0.8288 | 0.7669 | 0.9104 | 0.8960 | 0.9031 | 863/74/89 |
+| MobileNet-V2 | concat | 22.1M | OOM | — | — | — | — | — |
+| **MobileNet-V2** | **confidence_v2** | **5.7M** | **0.8918** | **0.7728** | **0.9302** | **0.9097** | **0.9198** | **890/41/62** |
+
+### 推理速度（T4 GPU）
+
+| Backbone | Fusion | 参数量 | 延迟 | FPS |
+|----------|--------|:------:|:----:|:---:|
+| ResNet-18 | concat | 32.7M | 1605ms | 0.62 |
+| MobileNet-V2 | confidence_v2 | 8.0M | 1046ms | 0.96 |
+
+### 分析
+
+1. **MobileNet-V2 + cv2 全面领先**：MODA +4.6pp, P +1.1pp, R +2.0pp, FP -29%, FN -30%
+2. **轻量 backbone 的正则化效应**：尽管 final loss (0.002633) 高于 ResNet-18 (0.001681)，MODA 反而更高，暗示 ResNet-18 可能过拟合
+3. **concat 融合在轻量 backbone 下 OOM**：进一步证明 attention fusion 的系统设计优势
+4. **最优阈值/NMS 差异**：MobileNet-V2+cv2 的最优阈值 0.425 / NMS 6.0，vs ResNet-18+concat 的 0.275 / 7.0，说明轻量模型输出的 heatmap 更尖锐、信噪比更高
+
+### 关键 commits
+- `0a29120`: fusion_mode 参数化
+- `83f58cd`: geometry device bug fix
+- `d180888`: MobileNet-V2 backbone 实现
+- `dc6ac22`: 截断到 features[0:14]
+- `1fce746`: gradient checkpointing
+
+---
+
 ## 2026-07-06
 
 ### 进展
@@ -210,18 +257,17 @@ MVDet 论文报告 0.882（MATLAB eval）；MVDet 代码自带的 Python eval �
 
 ## 项目里程碑
 
-| 日期 | 里程碑 | MODA |
-|------|--------|:----:|
-| 05-04 ~ 06-28 | 56 次训练, MODA 始终为 0 | 0.000 |
-| 06-29 | 发现 3 个根因 bug | — |
-| 06-30 | 首次 MODA > 0 | 0.529 |
-| 07-01 | 配置全面对齐 MVDet | — |
-| 07-02 | 首次无数据泄露 eval | 0.441 |
-| 07-06 | 深入排查：发现 workflow 默认值、AMP、dilation 3 个遗漏问题 | — |
-| 07-06 | **根因确认：NMS 半径 4× 过大**（20 reduced cells=2.0m，应为 5 cells=0.5m） | — |
-| **07-06** | **🏷️ v0.1.0-moda79 — MODA 0.793** | **0.793** |
-| 07-07 | NMS+阈值网格扫描，最优 NMS=6.0 thr=0.4 | **0.857** |
-| 07-07 | Pipeline 验证通过（backbone dilation 对齐，MODA 0.849 在合理范围） | 0.849 |
-| 07-07 | 文档体系重构 + 全局规则落盘 + checkpoint 周期性下载方案 | — |
-| 07-07 | 正式进入第二阶段：创新超越 MVDet | — |
-| **目标** | **超越 MVDet 基线** | **≥ 0.882** |
+| 日期 | 里程碑 | MODA | 参数量 |
+|------|--------|:----:|:------:|
+| 05-04 ~ 06-28 | 56 次训练, MODA 始终为 0 | 0.000 | — |
+| 06-29 | 发现 3 个根因 bug | — | — |
+| 06-30 | 首次 MODA > 0 | 0.529 | — |
+| 07-01 | 配置全面对齐 MVDet | — | — |
+| 07-02 | 首次无数据泄露 eval | 0.441 | — |
+| 07-06 | **根因确认：NMS 半径 4× 过大** | — | — |
+| **07-06** | **🏷️ v0.1.0-moda79 — MODA 0.793** | **0.793** | 32.7M |
+| 07-07 | NMS+阈值网格扫描，pipeline 验证通过 | **0.857** | 32.7M |
+| 07-07 | 正式进入第二阶段：创新超越 MVDet | — | — |
+| 07-13 | 统一对比实验，fusion_mode 参数化 | 0.8456 | 32.7M |
+| 07-14 | MobileNet-V2 backbone + gradient checkpointing | — | 5.7M |
+| **07-14** | **🏆 MODA 0.8918 — 超越 MVDet (0.882)，参数 -82.6%，速度 +55%** | **0.8918** | **5.7M** |

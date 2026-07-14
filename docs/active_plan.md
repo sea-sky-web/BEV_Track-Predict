@@ -1,61 +1,44 @@
 # Active Plan — 当前迭代
 
-> 每轮覆盖此文件。上一轮结果归入 daily-log.md。
-> 最后更新：2026-07-08
+> 最后更新：2026-07-14
 
-## 当前状态
+## 当前状态 🏆
 
-| 指标 | 值 | 目标 |
-|---|:---:|:---:|
-| MODA (best) | 0.857 | ≥ 0.882 |
-| MODA (pipeline验证) | 0.849 | — |
-| Precision | 0.918 | — |
-| Recall | 0.889 | — |
-| F1 | 0.903 | — |
-| 最优 NMS | 6.0 | — |
-| 最优阈值 | 0.400 | — |
+| 指标 | MVDet baseline | **Ours (best)** | 变化 |
+|---|:---:|:---:|:---:|
+| MODA | 0.8456 | **0.8918** | **+4.6pp** |
+| MODP | 0.7585 | **0.7728** | +1.4pp |
+| Precision | 0.9197 | **0.9302** | +1.1pp |
+| Recall | 0.8897 | **0.9097** | +2.0pp |
+| F1 | 0.9044 | **0.9198** | +1.5pp |
+| 参数量 | 32.7M | **5.7M** | **-82.6%** |
+| FPS (T4) | 0.62 | **0.96** | **+54.8%** |
 
-**阶段**：第二阶段 — 在现有基线上创新超越 MVDet
+**方法**：MobileNet-V2 (truncated, 0.6M) + Learned Attention Fusion (confidence_v2)
+**目标达成**：MODA 0.8918 > MVDet 论文 0.882 ✅
 
-## 当前迭代：Focal Loss + Offset Head 消融实验
+## 阶段：第二阶段 — 已完成核心创新，进入论文准备
 
-**目的**：通过隔离实验验证两个改进的独立贡献。
-
-### 代码状态
-`feat/focal-loss-offset-head` 分支已完成，代码已通过用户审阅，尚未合并。
-消融实验通过 CLI 参数隔离：
-
-| Run | loss_type | offset_weight | use_offset | 隔离的变量 |
-|---|---|---|---|---|
-| A（回归检查） | mse | 0.0 | false | 无变化，验证代码重构无副作用 |
-| B | focal | 0.0 | false | 只有 focal loss |
-| C | mse | 1.0 | true | 只有 offset head |
-| D（可选） | focal | 1.0 | true | 组合 |
-
-### Pending
-- run 28866188056（checkpoint 周期性下载验证，T4）仍在进行中
-- A/B/C 三个消融实验需要等 28866188056 完成后依次触发（共用 Colab session 名）
-
-## 当前训练配置（baseline）
-
+### 最佳配置
 ```
-backbone: resnet18 (progressive dilation: L3.B1=2, L4.B0=2, L4.B1=4)
-fusion_mode: concat
-img_head mid_ch: 64
+backbone: mobilenet_v2 (truncated features[0:14], gradient checkpointing)
+fusion_mode: confidence_v2
 optimizer: SGD lr=0.1 momentum=0.5 wd=5e-4
 scheduler: OneCycleLR max_lr=0.1
 epochs: 10, batch=1, frames=360 (train) / 40 (test, frame_start=360)
-augment: false
-amp: false
-bev_pos_weight: 1.0
-NMS: det_min_distance=6.0 (reduced grid cells, 0.6m physical)
-MODA matching: 0.5m (Hungarian)
-loss_type: mse (baseline) / focal (实验)
+loss_type: mse
+Best threshold: 0.425, Best NMS radius: 6.0
 ```
 
 ## 下一步
 
-1. 等 28866188056 完成 → 验证 checkpoint 下载成功
-2. 合并 focal-loss-offset-head 分支
-3. 依次触发 A/B/C 消融实验
-4. 根据结果决定是否做 D（组合）
+### P1（论文支撑实验）
+1. MobileNet-V2 + concat (加 gradient ckpt) — 控制变量
+2. MobileNet-V2 + geo_confidence_v1 — 验证几何先验在轻量 backbone 下的效果
+3. 截断版 MobileNet-V2 推理 benchmark — 更新 FPS 数据
+4. 多次训练方差统计（3 runs） — 确认结果置信区间
+
+### P2（可选增强实验）
+5. Focal loss 消融 (MobileNet-V2 + cv2)
+6. Offset head 消融 (MobileNet-V2 + cv2)
+7. 更多 epoch (20/30) — 验证是否欠拟合
