@@ -80,12 +80,14 @@ def _apply_mobilenet_dilation(blocks: list[nn.Module], dilation: int) -> None:
 class MobileNetV2Stride8Trunk(nn.Module):
     """MobileNet-V2 backbone with stride-8 output via dilated convolutions.
 
-    Uses the same progressive-dilation strategy as the ResNet backbones:
-    features[0:7]   → natural stride 8  (32ch output)
-    features[7:14]  → dilation=2 instead of stride 16  (96ch output)
-    features[14:18] → dilation=4 instead of stride 32  (320ch output)
-    features[18]    → 1x1 conv 320→1280ch
-    reduce          → 1x1 conv 1280→out_ch
+    Truncated at features[13] (96ch) to keep memory feasible for multi-view
+    training with gradient computation. Only features[7:14] use dilation=2;
+    the expensive stride-32 layers (features[14:18], expansion=6 ×160/320ch)
+    are dropped to avoid OOM on 15GB GPUs with 7 views.
+
+    features[0:7]  → natural stride 8  (32ch)
+    features[7:14] → dilation=2, stride 8  (96ch)
+    reduce         → 1x1 conv 96→out_ch
     """
 
     def __init__(self, pretrained: bool = True, out_ch: int = 512):
@@ -101,18 +103,11 @@ class MobileNetV2Stride8Trunk(nn.Module):
         _apply_mobilenet_dilation(s16_blocks, dilation=2)
         self.features_d2 = nn.Sequential(*s16_blocks)
 
-        s32_blocks = features[14:18]
-        _apply_mobilenet_dilation(s32_blocks, dilation=4)
-        self.features_d4 = nn.Sequential(*s32_blocks)
-
-        self.final_conv = features[18]
-        self.reduce = nn.Conv2d(1280, out_ch, 1)
+        self.reduce = nn.Conv2d(96, out_ch, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features_s8(x)
         x = self.features_d2(x)
-        x = self.features_d4(x)
-        x = self.final_conv(x)
         return self.reduce(x)
 
 
