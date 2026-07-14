@@ -6,6 +6,22 @@
 
 ---
 
+## 2026-07-15 — 模块二研究计划入库（仅计划，未实现）
+
+### 文档变更
+
+- 建立 BEV 行人世界坐标 tracking、占用/速度时空场与短时预测的详细研究计划。
+- 记录数据可行性、坐标/时间契约、理论依据、论文基础、实验矩阵、验收门和回退策略。
+- 将计划接入 `active_plan.md` 与 README 文档地图。
+
+### 边界
+
+- 本次没有代码、配置、模型或实验变更。
+- Tracking、trajectory forecasting 和 occupancy-flow 仍未实现。
+- 开始实现前必须另行更新并评审 `model_definition.md`。
+
+---
+
 ## 2026-07-14 🏆 Milestone: MODA 0.8918, 超越 MVDet
 
 ### 重大突破

@@ -1,6 +1,6 @@
 # Active Plan — 当前迭代
 
-> 最后更新：2026-07-14
+> 最后更新：2026-07-15
 
 ## 当前状态 🏆
 
@@ -31,6 +31,16 @@ Best threshold: 0.425, Best NMS radius: 6.0
 ```
 
 ## 下一步
+
+### 下一研究模块（计划阶段，尚未实现）
+
+第一模块检测结果冻结后，计划推进 BEV 行人世界坐标 tracking、占用/速度时空场构建与
+未来 0.5s / 1.0s / 2.0s 短时预测。详细可行性、理论依据、论文基础、实验矩阵和验收门：
+
+- [Module 2 Plan — BEV 行人时空场映射与短时预测](module2_spatiotemporal_field_prediction_plan.md)
+
+该链接目前仅为研究与实施计划，不代表 tracking 或 forecasting 已进入代码；开始实现前
+必须单独评审并更新 `model_definition.md`。
 
 ### P1（论文支撑实验）
 1. MobileNet-V2 + concat (加 gradient ckpt) — 控制变量
