@@ -65,10 +65,15 @@ def estimate_flops(model: MVDetLikeNet, fusion_mode: str, V: int, H: int, W: int
     # Offset head
     offset_flops = 2 * in_ch * 64 * 9 * hw + 2 * 64 * 2 * 1 * hw
 
-    # Backbone (shared, per view): rough ResNet-18 stride-8 estimate
-    # ~1.8 GFLOPs per view at 1080x1920 input
+    # Backbone (shared, per view): rough estimate
+    # ResNet-18: ~1.8 GFLOPs, MobileNet-V2: ~0.3 GFLOPs per view at 1080x1920
     Hf, Wf = H // 8, W // 8
-    backbone_per_view = 1.8e9 * (H * W) / (1080 * 1920)
+    scale = (H * W) / (1080 * 1920)
+    bb_name = getattr(model, "backbone_name", "resnet18")
+    if bb_name == "mobilenet_v2":
+        backbone_per_view = 0.3e9 * scale
+    else:
+        backbone_per_view = 1.8e9 * scale
     backbone_flops = V * backbone_per_view
 
     # Warp (grid_sample per view)
@@ -126,6 +131,7 @@ def main():
     Hf, Wf = H // 8, W // 8
     Hb, Wb = 120, 360
 
+    backbones = ["resnet18", "mobilenet_v2"]
     fusion_modes = ["concat", "confidence_v2", "geo_confidence_v1"]
     results = []
 
@@ -133,13 +139,14 @@ def main():
     print(f"Warmup={args.warmup}, Rounds={args.rounds}")
     print("=" * 80)
 
-    for fm in fusion_modes:
-        print(f"\n--- {fm} ---")
+    for bb in backbones:
+      for fm in fusion_modes:
+        print(f"\n--- {bb} + {fm} ---")
 
         model = MVDetLikeNet(
             num_views=V, proj_mats=proj,
             reduced_hw=(Hb, Wb), feat_hw=(Hf, Wf),
-            feat_ch=512, pretrained=False, backbone="resnet18",
+            feat_ch=512, pretrained=False, backbone=bb,
             add_coord=True, fusion_mode=fm,
         ).to(device).eval()
 
@@ -159,6 +166,7 @@ def main():
         fps = 1000.0 / avg_ms
 
         r = {
+            "backbone": bb,
             "fusion_mode": fm,
             "views": V,
             "resolution": f"{H}x{W}",
@@ -226,9 +234,9 @@ def main():
     print("\n" + "=" * 80)
     print("SUMMARY")
     print("=" * 80)
-    print(f"{'Mode':<25s} {'Params':>8s} {'Non-BB':>8s} {'GFLOPs':>8s} {'ms':>8s} {'FPS':>8s}")
+    print(f"{'Backbone':<15s} {'Mode':<20s} {'Params':>8s} {'Non-BB':>8s} {'GFLOPs':>8s} {'ms':>8s} {'FPS':>8s}")
     for r in results:
-        print(f"{r['fusion_mode']:<25s} {r['total_params_M']:>7.1f}M {r['non_backbone_params_M']:>7.1f}M {r['non_backbone_gflops']:>7.1f} {r['latency_ms']:>7.1f} {r['fps']:>7.2f}")
+        print(f"{r['backbone']:<15s} {r['fusion_mode']:<20s} {r['total_params_M']:>7.1f}M {r['non_backbone_params_M']:>7.1f}M {r['non_backbone_gflops']:>7.1f} {r['latency_ms']:>7.1f} {r['fps']:>7.2f}")
 
 
 if __name__ == "__main__":

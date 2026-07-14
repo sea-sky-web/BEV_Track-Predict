@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
         "--backbone",
         type=str,
         default=DEFAULT_BACKBONE,
-        choices=["resnet18", "resnet50"],
+        choices=["resnet18", "resnet50", "mobilenet_v2"],
         help="Backbone topology used by the checkpoint.",
     )
     ap.add_argument(

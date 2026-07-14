@@ -62,6 +62,9 @@ parser.add_argument("--offset_weight", type=float, default=0.0,
 parser.add_argument("--fusion_mode", default="confidence_v2",
                     choices=["concat", "confidence_v1", "confidence_v2", "geo_confidence_v1"],
                     help="BEV fusion mode (baseline = confidence_v2)")
+parser.add_argument("--backbone", default="resnet18",
+                    choices=["resnet18", "resnet50", "mobilenet_v2"],
+                    help="Backbone network (resnet18 = MVDet baseline)")
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
@@ -184,7 +187,7 @@ if args.epochs > 0:
     "--epochs",                 str(args.epochs),
     "--batch",                  "1",
     "--pretrained",             "true",
-    "--backbone",               "resnet18",
+    "--backbone",               args.backbone,
     "--fusion_mode",            args.fusion_mode,
     "--augment",                "false",
     "--alpha",                  "1.0",
@@ -225,7 +228,7 @@ eval_cmd = [
     "--metrics_out",     str(eval_out),
     "--views",           "0,1,2,3,4,5,6",
     "--fusion_mode",     args.fusion_mode,
-    "--backbone",        "resnet18",
+    "--backbone",        args.backbone,
     "--frame_start",     "360",    # MVDet test split: last 10% (frames 360-399 of 400 annotations)
     "--max_frames",      "40",
     "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.225,0.25,0.275,0.30,0.325,0.35,0.375,0.40,0.425,0.45,0.475,0.50,0.55,0.60",

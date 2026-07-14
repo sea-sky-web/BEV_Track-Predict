@@ -9,10 +9,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import ResNet18_Weights, ResNet50_Weights, resnet18, resnet50
+from torchvision.models import MobileNet_V2_Weights, mobilenet_v2
 
 from geometry import warp_perspective_torch
 
-BackboneName = Literal["resnet18", "resnet50"]
+BackboneName = Literal["resnet18", "resnet50", "mobilenet_v2"]
 FusionMode = Literal["concat", "confidence", "confidence_v1", "confidence_v2", "geo_confidence_v1"]
 
 
@@ -50,6 +51,69 @@ def _apply_mvdet_dilation(layer: nn.Sequential, previous_dilation: int, new_dila
             conv = block.downsample[0]
             if hasattr(conv, "stride") and conv.stride != (1, 1):
                 conv.stride = (1, 1)
+
+
+def _find_depthwise_conv(block: nn.Module) -> nn.Conv2d | None:
+    """Find the depthwise Conv2d inside a MobileNetV2 InvertedResidual block."""
+    for module in block.modules():
+        if isinstance(module, nn.Conv2d) and module.groups == module.in_channels and module.kernel_size != (1, 1):
+            return module
+    return None
+
+
+def _apply_mobilenet_dilation(blocks: list[nn.Module], dilation: int) -> None:
+    """Replace stride-2 with dilation in MobileNetV2 InvertedResidual blocks.
+
+    The first block with stride=2 gets stride→1 and the new dilation.
+    All subsequent blocks also get the new dilation on their depthwise conv.
+    """
+    for block in blocks:
+        dw = _find_depthwise_conv(block)
+        if dw is None:
+            continue
+        if dw.stride != (1, 1):
+            dw.stride = (1, 1)
+        dw.dilation = (dilation, dilation)
+        dw.padding = (dilation, dilation)
+
+
+class MobileNetV2Stride8Trunk(nn.Module):
+    """MobileNet-V2 backbone with stride-8 output via dilated convolutions.
+
+    Uses the same progressive-dilation strategy as the ResNet backbones:
+    features[0:7]   → natural stride 8  (32ch output)
+    features[7:14]  → dilation=2 instead of stride 16  (96ch output)
+    features[14:18] → dilation=4 instead of stride 32  (320ch output)
+    features[18]    → 1x1 conv 320→1280ch
+    reduce          → 1x1 conv 1280→out_ch
+    """
+
+    def __init__(self, pretrained: bool = True, out_ch: int = 512):
+        super().__init__()
+        weights = MobileNet_V2_Weights.IMAGENET1K_V1 if pretrained else None
+        m = mobilenet_v2(weights=weights)
+
+        features = list(m.features.children())
+
+        self.features_s8 = nn.Sequential(*features[:7])
+
+        s16_blocks = features[7:14]
+        _apply_mobilenet_dilation(s16_blocks, dilation=2)
+        self.features_d2 = nn.Sequential(*s16_blocks)
+
+        s32_blocks = features[14:18]
+        _apply_mobilenet_dilation(s32_blocks, dilation=4)
+        self.features_d4 = nn.Sequential(*s32_blocks)
+
+        self.final_conv = features[18]
+        self.reduce = nn.Conv2d(1280, out_ch, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.features_s8(x)
+        x = self.features_d2(x)
+        x = self.features_d4(x)
+        x = self.final_conv(x)
+        return self.reduce(x)
 
 
 class ResNet18Stride8Trunk(nn.Module):
@@ -417,7 +481,7 @@ class MVDetLikeNet(nn.Module):
         fusion_mode = normalize_fusion_mode(fusion_mode)
         if fusion_mode not in {"concat", "confidence_v1", "confidence_v2", "geo_confidence_v1"}:
             raise ValueError(f"Unsupported fusion_mode: {fusion_mode}")
-        if backbone not in {"resnet18", "resnet50"}:
+        if backbone not in {"resnet18", "resnet50", "mobilenet_v2"}:
             raise ValueError(f"Unsupported backbone: {backbone}")
         
         self.V = num_views
@@ -430,6 +494,8 @@ class MVDetLikeNet(nn.Module):
         # 共享的特征提取主干
         if backbone == "resnet18":
             self.backbone = ResNet18Stride8Trunk(pretrained=pretrained, out_ch=feat_ch)
+        elif backbone == "mobilenet_v2":
+            self.backbone = MobileNetV2Stride8Trunk(pretrained=pretrained, out_ch=feat_ch)
         else:
             self.backbone = ResNet50Stride8Trunk(pretrained=pretrained, out_ch=feat_ch)
         

@@ -76,7 +76,7 @@ def parse_args():
     
     # 网络架构
     ap.add_argument("--backbone", type=str, default=DEFAULT_BACKBONE,
-                    choices=["resnet18", "resnet50"],
+                    choices=["resnet18", "resnet50", "mobilenet_v2"],
                     help="共享图像 backbone：resnet18 默认，resnet50 保留 legacy")
     ap.add_argument("--bev_down", type=int, default=DEFAULT_BEV_DOWN,
                     help="BEV 下采样倍数")

@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from models import create_model
 
 
-def _make_model(fusion_mode: str):
+def _make_model(fusion_mode: str, backbone: str = "resnet18"):
     dev = torch.device("cpu")
     proj_mats = torch.eye(3).unsqueeze(0).repeat(2, 1, 1)
     return create_model(
@@ -22,7 +22,7 @@ def _make_model(fusion_mode: str):
         feat_hw=(8, 8),
         device=dev,
         pretrained=False,
-        backbone="resnet18",
+        backbone=backbone,
         feat_ch=512,
         add_coord=True,
         fusion_mode=fusion_mode,
@@ -44,6 +44,21 @@ def test_resnet18_forward_shapes_for_fusion_modes(fusion_mode):
     assert torch.isfinite(map_logits).all()
     assert torch.isfinite(offset_preds).all()
     assert torch.isfinite(imgs_logits).all()
+
+
+@pytest.mark.parametrize("fusion_mode", ["concat", "confidence_v2"])
+def test_mobilenet_v2_forward_shapes(fusion_mode):
+    model = _make_model(fusion_mode, backbone="mobilenet_v2")
+    model.eval()
+    x = torch.randn(1, 2, 3, 64, 64)
+
+    with torch.no_grad():
+        map_logits, offset_preds, imgs_logits = model(x)
+
+    assert map_logits.shape == (1, 1, 8, 8)
+    assert offset_preds.shape == (1, 2, 8, 8)
+    assert imgs_logits.shape == (1, 2, 2, 8, 8)
+    assert torch.isfinite(map_logits).all()
 
 
 def test_confidence_v2_backward_reaches_backbone():
