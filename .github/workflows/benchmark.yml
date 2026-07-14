@@ -1,0 +1,118 @@
+name: Benchmark Inference
+
+on:
+  workflow_dispatch:
+    inputs:
+      gpu:
+        description: 'GPU 型号（T4 / L4）'
+        default: 'T4'
+        required: false
+      rounds:
+        description: '推理测量轮数'
+        default: '50'
+        required: false
+
+jobs:
+  benchmark:
+    name: Benchmark on Colab ${{ inputs.gpu }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install colab-cli
+        run: pip install google-colab-cli
+
+      - name: Restore Colab credentials
+        env:
+          COLAB_REFRESH_TOKEN: ${{ secrets.COLAB_REFRESH_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          token = os.environ["COLAB_REFRESH_TOKEN"].strip()
+          assert token, "COLAB_REFRESH_TOKEN is empty"
+          creds = {
+              "token": None,
+              "refresh_token": token,
+              "token_uri": "https://oauth2.googleapis.com/token",
+              "client_id": "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
+              "client_secret": "d-FL95Q19q7MQmFpd7hHD0Ty",
+              "scopes": [
+                  "openid",
+                  "https://www.googleapis.com/auth/userinfo.profile",
+                  "https://www.googleapis.com/auth/userinfo.email",
+                  "https://www.googleapis.com/auth/cloud-platform",
+                  "https://www.googleapis.com/auth/colaboratory",
+                  "https://www.googleapis.com/auth/drive.file"
+              ],
+              "universe_domain": "googleapis.com",
+              "account": "",
+              "expiry": None
+          }
+          path = os.path.expanduser("~/.config/colab-cli/token.json")
+          os.makedirs(os.path.dirname(path), exist_ok=True)
+          with open(path, "w") as f:
+              json.dump(creds, f)
+          print("[OK] token.json ready")
+          EOF
+
+      - name: Create Colab session
+        run: |
+          colab stop -s bev-train 2>/dev/null || true
+          sleep 15
+          for attempt in 1 2 3; do
+            echo "=== Create session attempt $attempt ==="
+            colab new --gpu ${{ inputs.gpu }} --session bev-train && break
+            colab stop -s bev-train 2>/dev/null || true
+            sleep 30
+          done
+
+      - name: Run benchmark
+        timeout-minutes: 15
+        run: |
+          {
+            echo "import subprocess, sys"
+            echo "subprocess.run(['git', 'clone', 'https://github.com/sea-sky-web/BEV_Track-Predict.git', '/content/BEV_Track-Predict'], check=True)"
+            echo "subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '-r', '/content/BEV_Track-Predict/requirements.txt'], check=True)"
+            echo "import os; os.chdir('/content/BEV_Track-Predict')"
+            echo "subprocess.run([sys.executable, 'scripts/benchmark_inference.py', '--device', 'cuda', '--rounds', '${{ inputs.rounds }}', '--output', '/content/BEV_Track-Predict/outputs/benchmark_results.json'], check=True)"
+          } | colab exec -s bev-train --timeout 600
+
+      - name: Download results
+        run: |
+          colab download -s bev-train /content/BEV_Track-Predict/outputs/benchmark_results.json ./benchmark_results.json || true
+
+      - name: Print results
+        if: always()
+        run: |
+          if [ -f benchmark_results.json ]; then
+            python3 -c "
+          import json
+          r = json.load(open('benchmark_results.json'))
+          print('=' * 80)
+          print('BENCHMARK RESULTS')
+          print('=' * 80)
+          for b in r['benchmark']:
+              print(f\"{b['fusion_mode']:25s} | {b['total_params_M']:6.1f}M params | {b['non_backbone_gflops']:6.1f} GF non-bb | {b['latency_ms']:6.1f}ms | {b['fps']:6.2f} FPS\")
+          print()
+          print('SCALABILITY')
+          for s in r['scalability']:
+              print(f\"V={s['views']:2d}  concat={s['concat_total_M']:5.1f}M  cv2={s['confidence_v2_total_M']:5.1f}M  ratio={s['concat_total_M']/s['confidence_v2_total_M']:.1f}x\")
+          "
+          else
+            echo "[WARN] benchmark_results.json not found"
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark_results.json
+          if-no-files-found: warn
+
+      - name: Stop Colab session
+        if: always()
+        run: colab stop -s bev-train || true
