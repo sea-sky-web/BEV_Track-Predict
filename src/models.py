@@ -80,10 +80,10 @@ def _apply_mobilenet_dilation(blocks: list[nn.Module], dilation: int) -> None:
 class MobileNetV2Stride8Trunk(nn.Module):
     """MobileNet-V2 backbone with stride-8 output via dilated convolutions.
 
-    Truncated at features[13] (96ch) to keep memory feasible for multi-view
-    training with gradient computation. Only features[7:14] use dilation=2;
-    the expensive stride-32 layers (features[14:18], expansion=6 ×160/320ch)
-    are dropped to avoid OOM on 15GB GPUs with 7 views.
+    Truncated at features[13] (96ch) and uses gradient checkpointing to
+    keep memory feasible for multi-view training (7 views × 1080×1920).
+    Only features[7:14] use dilation=2; the expensive stride-32 layers
+    (features[14:18], expansion=6 ×160/320ch) are dropped.
 
     features[0:7]  → natural stride 8  (32ch)
     features[7:14] → dilation=2, stride 8  (96ch)
@@ -106,8 +106,13 @@ class MobileNetV2Stride8Trunk(nn.Module):
         self.reduce = nn.Conv2d(96, out_ch, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.features_s8(x)
-        x = self.features_d2(x)
+        if self.training:
+            from torch.utils.checkpoint import checkpoint_sequential
+            x = checkpoint_sequential(self.features_s8, 3, x, use_reentrant=False)
+            x = checkpoint_sequential(self.features_d2, 3, x, use_reentrant=False)
+        else:
+            x = self.features_s8(x)
+            x = self.features_d2(x)
         return self.reduce(x)
 
 
