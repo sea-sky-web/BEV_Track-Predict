@@ -232,14 +232,19 @@ GitHub Actions 的 `Python Smoke` workflow 会安装 CPU 版 PyTorch，并覆盖
 
 ## 文档
 
-- 训练目标与预期效果：`docs/training_goals.md`
-- MVDet 对齐修复计划：`docs/mvdet_alignment_plan.md`
-- 模型边界：`docs/model_definition.md`
-- 实验协议：`docs/experiment_protocol.md`
-- 评估管线分析：`docs/eval_pipeline_analysis.md`
-- 迭代记录格式：`docs/experiment_iteration_protocol.md`
-- 数据契约：`docs/dataset_contract.md`
-- 历史探索：`docs/EXPLORATION_MEMORY.md`
+活跃文档：
+
+- 当前迭代：[`docs/active_plan.md`](docs/active_plan.md)
+- 模块二计划（尚未实现）：[`docs/module2_spatiotemporal_field_prediction_plan.md`](docs/module2_spatiotemporal_field_prediction_plan.md)
+- 研究进展：[`docs/research_progress.md`](docs/research_progress.md)
+- 每日实验日志：[`docs/daily-log.md`](docs/daily-log.md)
+- 经验教训：[`docs/LESSONS.md`](docs/LESSONS.md)
+- 模型边界：[`docs/model_definition.md`](docs/model_definition.md)
+- 数据契约：[`docs/dataset_contract.md`](docs/dataset_contract.md)
+- 迭代记录协议：[`docs/experiment_iteration_protocol.md`](docs/experiment_iteration_protocol.md)
+- 训练目标：[`docs/training_goals.md`](docs/training_goals.md)
+
+低频背景与历史方案统一位于 [`docs/references/`](docs/references/)。
 
 ## 常见问题
 
