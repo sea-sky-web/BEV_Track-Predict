@@ -239,7 +239,7 @@ def compute_bev_geometry_metadata(
     ys = torch.arange(Hd, dtype=torch.float64)
     yy, xx = torch.meshgrid(ys, xs, indexing="ij")
     ones = torch.ones_like(xx)
-    dst_h = torch.stack([xx, yy, ones], dim=0).reshape(3, -1)  # (3, Hd*Wd)
+    dst_h = torch.stack([xx, yy, ones], dim=0).reshape(3, -1).to(proj_mats.device)  # (3, Hd*Wd)
 
     half_min = min(Hs, Ws) / 2.0
     per_view = []
@@ -250,8 +250,8 @@ def compute_bev_geometry_metadata(
         try:
             M_inv = torch.linalg.inv(M)
         except Exception:
-            vm = torch.zeros(Hd, Wd, dtype=torch.float32)
-            bm = torch.zeros(Hd, Wd, dtype=torch.float32)
+            vm = torch.zeros(Hd, Wd, dtype=torch.float32, device=proj_mats.device)
+            bm = torch.zeros(Hd, Wd, dtype=torch.float32, device=proj_mats.device)
             per_view.append(torch.stack([vm, bm]))
             valid_masks.append(vm)
             continue
@@ -271,8 +271,8 @@ def compute_bev_geometry_metadata(
         )
         vm = valid.float().reshape(Hd, Wd).to(torch.float32)
 
-        dx = torch.minimum(x, torch.tensor(Ws - 1, dtype=torch.float64) - x)
-        dy = torch.minimum(y, torch.tensor(Hs - 1, dtype=torch.float64) - y)
+        dx = torch.minimum(x, torch.tensor(Ws - 1, dtype=torch.float64, device=x.device) - x)
+        dy = torch.minimum(y, torch.tensor(Hs - 1, dtype=torch.float64, device=y.device) - y)
         margin = torch.minimum(dx, dy) / half_min
         margin = margin.clamp(0.0, 1.0)
         margin[~valid] = 0.0
