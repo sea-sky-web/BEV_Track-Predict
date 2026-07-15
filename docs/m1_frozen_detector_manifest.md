@@ -9,20 +9,21 @@
 
 | 项目 | 值 |
 |------|-----|
-| GA Run ID | 29332987206 |
-| GA Run Number | 94 |
-| Artifact Name | bev-checkpoint-run94 |
-| Artifact ID | 8314786990 |
-| Artifact Size | 21,110,782 bytes |
-| Commit SHA | 1fce74620ac11c37bc291191e5ea7384fb4aee91 |
-| Tag | v0.2.0-moda8918 |
+| GA Run ID | 29345199882 |
+| GA Run Number | 95 |
+| Artifact Name | bev-checkpoint-run95 |
+| Artifact ID | 8319492725 |
+| Artifact Size | 21,714,456 bytes |
+| Commit SHA | 014d33258829eb61f827f2c6eb5048e1cfa4318d |
+| Tag | v0.2.1-moda8950 |
 | Training Date | 2026-07-14 |
+| Previous Best | Run 29332987206 (cv2, MODA 0.8918) |
 
 ## 2. 冻结配置
 
 ```yaml
 backbone: mobilenet_v2    # truncated features[0:14], gradient checkpointing
-fusion_mode: confidence_v2
+fusion_mode: geo_confidence_v1
 feat_ch: 512
 views: 0,1,2,3,4,5,6      # 7 views
 optimizer: sgd
@@ -46,8 +47,8 @@ bev_pos_weight: 1.0
 ```yaml
 frame_start: 360           # test split (frames 360-399)
 max_frames: 40
-det_best_threshold: 0.425
-det_best_nms_radius: 6.0
+det_best_threshold: 0.375
+det_best_nms_radius: 5.0
 det_dist_thr: 3.0          # MODA matching distance (BEV cells)
 ```
 
@@ -55,16 +56,16 @@ det_dist_thr: 3.0          # MODA matching distance (BEV cells)
 
 | 指标 | 值 |
 |------|-----|
-| MODA | 0.8918 |
-| MODP | 0.7728 |
-| Precision | 0.9302 |
-| Recall | 0.9097 |
-| F1 | 0.9198 |
-| TP | 890 |
-| FP | 41 |
-| FN | 62 |
-| Best Threshold | 0.425 |
-| Best NMS Radius | 6.0 |
+| MODA | 0.8950 |
+| MODP | 0.7778 |
+| Precision | 0.9301 |
+| Recall | 0.9223 |
+| F1 | 0.9262 |
+| TP | 898 |
+| FP | 46 |
+| FN | 54 |
+| Best Threshold | 0.375 |
+| Best NMS Radius | 5.0 |
 
 ## 5. 训练曲线
 

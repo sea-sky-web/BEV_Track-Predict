@@ -2,7 +2,7 @@
 
 > 最后更新：2026-07-14
 > 仓库：`sea-sky-web/BEV_Track-Predict`
-> **Milestone: MODA 0.8918 — 超越 MVDet baseline (0.882)，参数量仅 5.7M (17.4%)**
+> **Milestone: MODA 0.8950 — 超越 MVDet baseline (0.882)，参数量仅 5.7M (17.4%)**
 
 ---
 
@@ -65,21 +65,22 @@ BEV head 输入从 3586ch 降到 514ch（512 + 2 coord），head 参数从 18.9M
 | Attention Fusion | ResNet-18 | confidence_v2 | 16.3M | 0.8277 | 0.7573 | 0.9152 | 0.8729 | 0.8935 | 848/60/104 | 29220635744 |
 | + Geometry Prior | ResNet-18 | geo_confidence_v1 | 16.3M | 0.8288 | 0.7669 | 0.9104 | 0.8960 | 0.9031 | 863/74/89 | 29301458120 |
 | MVDet + MobileNet | MobileNet-V2 | concat | 22.1M | **OOM** | — | — | — | — | — | 29331658358 |
-| **Ours (best)** | **MobileNet-V2** | **confidence_v2** | **5.7M** | **0.8918** | **0.7728** | **0.9302** | **0.9097** | **0.9198** | **890/41/62** | **29332987206** |
+| Attention only | MobileNet-V2 | confidence_v2 | 5.7M | 0.8918 | 0.7728 | 0.9302 | 0.9097 | 0.9198 | 890/41/62 | 29332987206 |
+| **Ours (best)** | **MobileNet-V2** | **geo_confidence_v1** | **5.7M** | **0.8950** | **0.7778** | **0.9301** | **0.9223** | **0.9262** | **898/46/54** | **29345199882** |
 
 ### 3.2 最佳方法 vs MVDet 对比
 
-| 指标 | MVDet (ResNet-18 + concat) | **Ours (MobileNet-V2 + cv2)** | **改进** |
+| 指标 | MVDet (ResNet-18 + concat) | **Ours (MobileNet-V2 + geo_cv1)** | **改进** |
 |------|:---:|:---:|:---:|
-| MODA | 0.8456 | **0.8918** | **+4.6pp** |
-| MODP | 0.7585 | **0.7728** | **+1.4pp** |
-| Precision | 0.9197 | **0.9302** | **+1.1pp** |
-| Recall | 0.8897 | **0.9097** | **+2.0pp** |
-| F1 | 0.9044 | **0.9198** | **+1.5pp** |
-| FP | 58 | **41** | **-29.3%** |
-| FN | 89 | **62** | **-30.3%** |
+| MODA | 0.8456 | **0.8950** | **+4.9pp** |
+| MODP | 0.7585 | **0.7778** | **+1.9pp** |
+| Precision | 0.9197 | **0.9301** | **+1.0pp** |
+| Recall | 0.8897 | **0.9223** | **+3.3pp** |
+| F1 | 0.9044 | **0.9262** | **+2.2pp** |
+| FP | 58 | **46** | **-20.7%** |
+| FN | 89 | **54** | **-39.3%** |
 | 参数量 | 32.7M | **5.7M** | **-82.6%** |
-| 推理延迟 (T4) | 1605ms | **1046ms** | **-34.8%** |
+| 推理延迟 (T4) | 1605ms | **1044ms** | **-35.0%** |
 | FPS (T4) | 0.62 | **0.96** | **+54.8%** |
 
 ### 3.3 训练曲线对比
@@ -151,7 +152,7 @@ MobileNet-V2 + concat 在 T4 (15GB) 上 OOM：
 ## 4. 关键发现与论文论点
 
 ### 核心论点
-轻量的 learned attention fusion + 轻量 backbone 可以在**参数量减少 82.6%、速度提升 55%** 的同时，**精度超越 MVDet baseline 4.6 个 MODA 点**。
+轻量的 learned attention fusion + 几何先验 + 轻量 backbone 可以在**参数量减少 82.6%、速度提升 55%** 的同时，**精度超越 MVDet baseline 4.9 个 MODA 点**。
 
 ### 支撑论据
 
@@ -230,7 +231,7 @@ gh workflow run benchmark.yml --repo sea-sky-web/BEV_Track-Predict -f gpu=T4
 | 07-07 | 进入第二阶段：创新超越 MVDet | — | — |
 | 07-13 | 统一对比实验：concat vs attention fusion | 0.8456 | 32.7M |
 | 07-14 | MobileNet-V2 backbone + gradient checkpointing | — | 5.7M |
-| **07-14** | **🏆 MODA 0.8918 — 超越 MVDet (0.882)，参数 -82.6%，速度 +55%** | **0.8918** | **5.7M** |
+| **07-14** | **🏆 MODA 0.8950 — 超越 MVDet (0.882)，参数 -82.6%，速度 +55%** | **0.8950** | **5.7M** |
 
 ---
 

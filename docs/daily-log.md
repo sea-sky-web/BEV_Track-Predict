@@ -45,6 +45,7 @@ MobileNet-V2 + Learned Attention Fusion 在 WildTrack 上达到 **MODA 0.8918**�
 | ResNet-18 | geo_confidence_v1 | 16.3M | 0.8288 | 0.7669 | 0.9104 | 0.8960 | 0.9031 | 863/74/89 |
 | MobileNet-V2 | concat | 22.1M | OOM | — | — | — | — | — |
 | **MobileNet-V2** | **confidence_v2** | **5.7M** | **0.8918** | **0.7728** | **0.9302** | **0.9097** | **0.9198** | **890/41/62** |
+| **MobileNet-V2** | **geo_confidence_v1** | **5.7M** | **0.8950** | **0.7778** | **0.9301** | **0.9223** | **0.9262** | **898/46/54** |
 
 ### 推理速度（T4 GPU）
 
@@ -286,4 +287,4 @@ MVDet 论文报告 0.882（MATLAB eval）；MVDet 代码自带的 Python eval �
 | 07-07 | 正式进入第二阶段：创新超越 MVDet | — | — |
 | 07-13 | 统一对比实验，fusion_mode 参数化 | 0.8456 | 32.7M |
 | 07-14 | MobileNet-V2 backbone + gradient checkpointing | — | 5.7M |
-| **07-14** | **🏆 MODA 0.8918 — 超越 MVDet (0.882)，参数 -82.6%，速度 +55%** | **0.8918** | **5.7M** |
+| **07-14** | **🏆 MODA 0.8950 — 超越 MVDet (0.882)，参数 -82.6%，速度 +55%** | **0.8950** | **5.7M** |
