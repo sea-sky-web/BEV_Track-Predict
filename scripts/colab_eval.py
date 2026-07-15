@@ -208,6 +208,8 @@ def main():
         "--output", str(REPO_DIR / "outputs" / "visualization"),
         "--device", args.device,
         "--frame", "0",
+        "--backbone", args.backbone,
+        "--fusion_mode", args.fusion_mode,
     ]
     print("\n[VIZ] 生成可视化...", flush=True)
     run(viz_cmd, cwd=str(REPO_DIR), check=False)
