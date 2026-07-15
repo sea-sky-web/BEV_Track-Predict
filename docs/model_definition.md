@@ -196,11 +196,11 @@ The following are not part of the current model definition:
 - Synthetic data training.
 - Real station deployment.
 
-These items must not be implemented under the current model definition.
+These items must not be implemented under Module 1.
 
 ---
 
-## 10. Success Criteria
+## 10. Success Criteria (Module 1)
 
 The current model is considered valid only if it can:
 
@@ -215,3 +215,85 @@ The current model is considered valid only if it can:
 
 Quantitative targets (MODA ≥ 0.30, SNR ≥ 1.0, etc.) and visual acceptance
 criteria for the BEV heatmap are defined in `docs/training_goals.md`.
+
+---
+
+## 11. Module 2 Stage Boundary
+
+Module 2 builds on the frozen Module 1 detector. The Module 1 checkpoint,
+configuration, and evaluation pipeline are immutable — Module 2 code must not
+modify any file under Sections 1–10.
+
+### 11.1 Module 2 Scope
+
+Module 2 includes:
+
+- Temporal annotation reading with `personID` for GT trajectory construction.
+- World-coordinate conversion: `positionID` → full grid → reduced grid → meters.
+- Multi-object tracking by detection (Kalman + Hungarian, nearest-neighbor baseline).
+- BEV occupancy field and velocity field construction from tracked positions.
+- Non-learning prediction baselines (persistence, constant velocity, field advection, oracle).
+- ConvLSTM-based spatiotemporal field prediction (future stage).
+- End-to-end evaluation with detection → tracking → prediction error decomposition.
+
+### 11.2 Module 2 Excludes
+
+- Modification of Module 1 detector, backbone, fusion, or training pipeline.
+- Cross-camera ReID (unless justified by IDSW analysis).
+- BEVFormer, PETR, LSS, DETR3D, or large Transformer architectures.
+- Datasets other than WildTrack.
+- Real deployment, crowd control, or risk decision-making.
+
+### 11.3 Module 2 Code Location
+
+All Module 2 code resides in `src/temporal/`. Module 1 source files under
+`src/` (dataset.py, models.py, trainer.py, train_main.py, evaluate_main.py,
+loss.py, metrics.py, geometry.py, config.py, calibration.py, augmentation.py,
+utils.py) must not be modified for Module 2 purposes.
+
+### 11.4 Module 2 Input
+
+Module 2 consumes:
+
+- Frozen detector BEV point detections (JSONL with world coordinates).
+- WildTrack GT annotations with `personID` and `positionID`.
+
+Module 2 does not consume raw images or BEV heatmaps directly.
+
+### 11.5 Module 2 Output
+
+- Tracked pedestrian trajectories in world coordinates (JSONL).
+- BEV occupancy field and velocity field (NPZ, shape `[5, 120, 360]`).
+- Future field predictions at horizons 0.5s, 1.0s, 2.0s.
+- Individual trajectory predictions derived from predicted velocity fields.
+- Evaluation metrics: MOTA, IDF1, IDSW, occupancy AUPRC, velocity EPE, ADE, FDE.
+
+### 11.6 Module 2 Coordinate Convention
+
+The only canonical coordinate is `(world_x_m, world_y_m)` in meters.
+
+```text
+row_full = positionID mod 480
+col_full = positionID div 480
+world_x_m = ORIGINE_X_M + (row_full + 0.5) × 0.025
+world_y_m = ORIGINE_Y_M + (col_full + 0.5) × 0.025
+```
+
+Reduced grid (120 × 360, 0.1 m/cell) is a derived representation.
+All intermediate coordinates must carry explicit `_full` or `_reduced` suffixes.
+
+### 11.7 Module 2 Time Convention
+
+```text
+frame_rate = 2 Hz
+timestamp_s = frame_index / 2.0
+dt = 0.5 s
+```
+
+Fixed time splits (no random shuffling):
+
+| Split | Frames | Count |
+|---|---:|---:|
+| Train | 0–319 | 320 |
+| Validation | 320–359 | 40 |
+| Test | 360–399 | 40 |

@@ -10,6 +10,14 @@ on:
         description: 'GPU 型号（T4 / L4 / A100）'
         default: 'T4'
         required: false
+      fusion_mode:
+        description: 'BEV 融合模式'
+        default: 'geo_confidence_v1'
+        required: false
+      backbone:
+        description: 'Backbone 网络'
+        default: 'mobilenet_v2'
+        required: false
 
 jobs:
   eval:
@@ -58,45 +66,79 @@ jobs:
           EOF
 
       - name: Download training artifact
-        continue-on-error: true
+        id: download_model
         run: |
-          gh run download ${{ inputs.train_run_id }} --dir ./artifact_dl 2>&1 || true
-          if [ -f ./artifact_dl/*/model_final.pth ]; then
-            cp ./artifact_dl/*/model_final.pth ./model_final.pth
-            echo "[OK] model_final.pth downloaded from run ${{ inputs.train_run_id }}"
-          else
-            echo "[WARN] Could not download model from run ${{ inputs.train_run_id }}"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check model file
-        id: check_model
-        run: |
-          if [ -f model_final.pth ]; then
+          echo "Downloading checkpoint from run ${{ inputs.train_run_id }}..."
+          gh run download ${{ inputs.train_run_id }} -D /tmp/ckpt --repo ${{ github.repository }} 2>&1 || true
+          CKPT=$(find /tmp/ckpt -name 'model_final.pth' -type f 2>/dev/null | head -1)
+          if [ -n "$CKPT" ]; then
+            cp "$CKPT" ./model_final.pth
             echo "found=true" >> $GITHUB_OUTPUT
-            echo "[OK] model_final.pth found ($(du -h model_final.pth | cut -f1))"
+            echo "[OK] model_final.pth downloaded ($(du -h ./model_final.pth | cut -f1))"
           else
             echo "found=false" >> $GITHUB_OUTPUT
-            echo "[WARN] model_final.pth not found, will use default from repo"
+            echo "[ERROR] model_final.pth not found in run ${{ inputs.train_run_id }} artifacts"
+            echo "Available artifacts:"
+            find /tmp/ckpt -type f 2>/dev/null || echo "(none)"
+            exit 1
           fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
-      - name: Create Colab session
-        run: colab new --gpu ${{ inputs.gpu }} --session bev-eval
+      - name: Kill stale sessions and create session
+        run: |
+          colab stop -s bev-eval 2>/dev/null || true
+          sleep 15
+          for attempt in 1 2 3; do
+            echo "=== Create session attempt $attempt ==="
+            colab new --gpu ${{ inputs.gpu }} --session bev-eval && break
+            echo "Attempt $attempt failed, retrying in 30s..."
+            colab stop -s bev-eval 2>/dev/null || true
+            sleep 30
+          done
 
       - name: Upload model to Colab
-        if: steps.check_model.outputs.found == 'true'
         run: |
-          colab upload -s bev-eval model_final.pth /content/model_final.pth || true
+          REMOTE="/content/BEV_Track-Predict/outputs/train_multicam_mvdet_style_v3"
+          echo "import os; os.makedirs('$REMOTE', exist_ok=True)" | colab exec -s bev-eval
+
+          # Split into chunks to avoid SSLEOFError on large uploads
+          CHUNK_DIR=/tmp/ckpt_chunks
+          mkdir -p "$CHUNK_DIR"
+          split -b 8m ./model_final.pth "$CHUNK_DIR/chunk_"
+          echo "import os; os.makedirs('$REMOTE/_chunks', exist_ok=True)" | colab exec -s bev-eval
+
+          for part in "$CHUNK_DIR"/chunk_*; do
+            name=$(basename "$part")
+            for attempt in 1 2 3; do
+              echo "=== Upload $name attempt $attempt ==="
+              colab upload -s bev-eval "$part" "$REMOTE/_chunks/$name" && break
+              if [ "$attempt" -eq 3 ]; then
+                echo "[ERROR] Checkpoint chunk $name failed after 3 attempts"
+                exit 1
+              fi
+              sleep 10
+            done
+          done
+
+          echo "import glob, shutil
+          parts = sorted(glob.glob('$REMOTE/_chunks/chunk_*'))
+          with open('$REMOTE/model_final.pth', 'wb') as out:
+              for p in parts:
+                  with open(p, 'rb') as f:
+                      shutil.copyfileobj(f, out)
+          shutil.rmtree('$REMOTE/_chunks')
+          import os
+          size = os.path.getsize('$REMOTE/model_final.pth')
+          print(f'[OK] Reassembled {len(parts)} chunks, total {size/1e6:.1f} MB')
+          " | colab exec -s bev-eval
+          echo "[OK] Checkpoint uploaded to Colab"
 
       - name: Run evaluation
+        timeout-minutes: 60
         run: |
           {
-            if [ "${{ steps.check_model.outputs.found }}" == "true" ]; then
-              echo "import sys; sys.argv = ['colab_eval.py', '--model_path', '/content/model_final.pth']"
-            else
-              echo "import sys; sys.argv = ['colab_eval.py']"
-            fi
+            echo "import sys; sys.argv = ['colab_eval.py', '--model_path', 'outputs/train_multicam_mvdet_style_v3/model_final.pth', '--fusion_mode', '${{ inputs.fusion_mode }}', '--backbone', '${{ inputs.backbone }}']"
             cat scripts/colab_eval.py
           } | colab exec -s bev-eval --timeout 3600
 
@@ -104,9 +146,9 @@ jobs:
         if: always()
         run: |
           REMOTE="/content/BEV_Track-Predict/outputs"
-          colab download -s bev-eval "$REMOTE/eval_results.json"           ./eval_results.json    || true
-          colab download -s bev-eval "$REMOTE/visualization/bev_prediction.png" ./bev_prediction.png || true
-          colab download -s bev-eval "$REMOTE/visualization/bev_overlay.png"    ./bev_overlay.png    || true
+          colab download -s bev-eval "$REMOTE/eval_results.json"                  ./eval_results.json    || true
+          colab download -s bev-eval "$REMOTE/visualization/bev_prediction.png"   ./bev_prediction.png   || true
+          colab download -s bev-eval "$REMOTE/visualization/bev_overlay.png"      ./bev_overlay.png      || true
 
       - name: Print results summary
         if: always()
@@ -118,21 +160,20 @@ jobs:
           print('=' * 50)
           print('EVALUATION RESULTS')
           print('=' * 50)
-          for k in ['loss','pos_mse','aux_pos_mse']:
-              print(f'{k:20s}: {r.get(k, \"N/A\"):.6f}' if isinstance(r.get(k), (int,float)) else f'{k:20s}: N/A')
           if 'det_moda' in r:
-              print('-' * 50)
               print(f'{\"MODA\":20s}: {r[\"det_moda\"]:.4f}')
               print(f'{\"MODP\":20s}: {r[\"det_modp\"]:.4f}')
               print(f'{\"Precision\":20s}: {r[\"det_precision\"]:.4f}')
               print(f'{\"Recall\":20s}: {r[\"det_recall\"]:.4f}')
               print(f'{\"F1\":20s}: {r[\"det_f1\"]:.4f}')
               print(f'{\"Best Threshold\":20s}: {r[\"det_best_threshold\"]:.2f}')
+              print(f'{\"Best NMS Radius\":20s}: {r.get(\"det_best_nms_radius\", \"N/A\")}')
               print(f'{\"TP/FP/FN\":20s}: {int(r[\"det_moda_tp\"])}/{int(r[\"det_moda_fp\"])}/{int(r[\"det_moda_fn\"])}')
           print('=' * 50)
           "
           else
-            echo "[WARN] eval_results.json not found"
+            echo "[ERROR] eval_results.json not found — evaluation failed"
+            exit 1
           fi
 
       - name: Upload artifacts

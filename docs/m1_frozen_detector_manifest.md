@@ -104,6 +104,6 @@ Epoch 9: loss=0.002633 bev=0.001839 img=0.000794 snr=0.357
 
 Module 2 的所有时序实验必须：
 1. 使用本 manifest 中记录的 checkpoint，不得更换
-2. 使用冻结的 threshold=0.425 和 NMS=6.0 提取检测点
+2. 使用冻结的 threshold=0.375 和 NMS=5.0 提取检测点
 3. 记录 detector manifest 版本号和 checkpoint SHA256
 4. 分层报告：GT → GT association → full tracker 三级评估

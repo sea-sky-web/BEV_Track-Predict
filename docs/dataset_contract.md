@@ -308,3 +308,82 @@ WildTrack synchronized multi-view images
 ```
 
 This contract exists to keep AI-assisted model development aligned with the current BEV pedestrian detection stage.
+
+---
+
+## 14. Module 2 Temporal Annotation Contract
+
+Module 2 extends the annotation contract to support temporal tracking and
+field prediction. This section does not modify Sections 1–13; it adds new
+annotation usage that was excluded in the Module 1 scope.
+
+### 14.1 personID Usage
+
+WildTrack annotation JSON objects contain a `personID` field that uniquely
+identifies each pedestrian across frames. Module 2 uses `personID` for:
+
+- Ground-truth trajectory construction (linking positions across frames).
+- Tracking evaluation (MOTA, IDF1, ID switches).
+- Velocity estimation via finite differences along identity-consistent trajectories.
+- Oracle baseline construction (GT identity + GT velocity).
+
+`personID` must not be used for Module 1 detection training or evaluation.
+
+### 14.2 Temporal Annotation Reader
+
+A separate reader (`src/temporal/annotation_reader.py`) loads all annotation
+files from `annotations_positions/`, extracting per-object:
+
+```text
+frame_index       # sorted position in directory listing (0-based)
+frame_stem        # annotation filename without extension
+personID          # WildTrack identity
+positionID        # WildTrack ground position encoding
+world_x_m         # decoded world X in meters
+world_y_m         # decoded world Y in meters
+```
+
+This reader does not modify or replace `src/dataset.py`.
+
+### 14.3 Temporal Data Splits
+
+Fixed sequential splits (no random shuffling):
+
+| Split | frame_index | Count | Purpose |
+|---|---:|---:|---|
+| Train | 0–319 | 320 | Parameter learning |
+| Validation | 320–359 | 40 | Tuning, model selection |
+| Test | 360–399 | 40 | One-shot final evaluation |
+
+With 4 history + 4 future frames, this yields ~313 train windows, ~33
+validation windows, and ~33 test windows. Overlapping time windows across
+splits are forbidden.
+
+### 14.4 Velocity Target Generation
+
+GT velocity for person `i` at frame `t`:
+
+- Interior frames (t-1 and t+1 both have same personID): central difference.
+- First appearance: forward difference.
+- Last appearance: backward difference.
+- Gap > 1 frame in personID sequence: no cross-gap interpolation.
+
+Velocity unit: meters per second (m/s), using `dt = 0.5 s`.
+
+### 14.5 Field Target Generation
+
+Module 2 constructs dense BEV fields on the reduced grid (120 × 360, 0.1 m/cell):
+
+- **Occupancy field**: Gaussian kernel rasterization of pedestrian positions.
+- **Velocity field**: Kernel-weighted average of per-track velocities.
+- **Confidence field**: Detection score at each pedestrian position (detector input only).
+- **Valid mask**: Union of camera projection coverage areas.
+
+Field tensors shape: `[5, 120, 360]` — `[occupancy, vx, vy, confidence, valid_mask]`.
+
+### 14.6 Output Formats
+
+- Points and trajectories: JSONL (one record per detection/track per frame).
+- Dense fields: compressed NPZ.
+- Configuration and manifests: YAML.
+- All large files: `outputs/temporal/<run_id>/`, not committed to Git.
