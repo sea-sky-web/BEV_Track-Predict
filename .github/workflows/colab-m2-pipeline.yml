@@ -1,0 +1,201 @@
+name: Module 2 Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      gpu:
+        description: 'GPU 型号（T4 / L4 / A100）'
+        default: 'T4'
+        required: false
+      seed:
+        description: '随机种子'
+        default: '0'
+        required: false
+      skip_training:
+        description: '跳过 ConvLSTM 训练（仅运行 tracking + baselines）'
+        default: 'false'
+        required: false
+
+jobs:
+  pipeline:
+    name: M2 Pipeline on Colab ${{ inputs.gpu }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install colab-cli
+        run: pip install google-colab-cli
+
+      - name: Restore Colab credentials
+        env:
+          COLAB_REFRESH_TOKEN: ${{ secrets.COLAB_REFRESH_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          token = os.environ["COLAB_REFRESH_TOKEN"].strip()
+          assert token, "COLAB_REFRESH_TOKEN is empty"
+          creds = {
+              "token": None,
+              "refresh_token": token,
+              "token_uri": "https://oauth2.googleapis.com/token",
+              "client_id": "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com",
+              "client_secret": "d-FL95Q19q7MQmFpd7hHD0Ty",
+              "scopes": [
+                  "openid",
+                  "https://www.googleapis.com/auth/userinfo.profile",
+                  "https://www.googleapis.com/auth/userinfo.email",
+                  "https://www.googleapis.com/auth/cloud-platform",
+                  "https://www.googleapis.com/auth/colaboratory",
+                  "https://www.googleapis.com/auth/drive.file"
+              ],
+              "universe_domain": "googleapis.com",
+              "account": "",
+              "expiry": None
+          }
+          path = os.path.expanduser("~/.config/colab-cli/token.json")
+          os.makedirs(os.path.dirname(path), exist_ok=True)
+          with open(path, "w") as f:
+              json.dump(creds, f)
+          print("[OK] token.json constructed from refresh_token")
+          EOF
+
+      - name: Create Colab session
+        run: |
+          colab stop -s bev-m2 2>/dev/null || true
+          sleep 15
+          for attempt in 1 2 3; do
+            echo "=== Create session attempt $attempt ==="
+            colab new --gpu ${{ inputs.gpu }} --session bev-m2 && break
+            echo "Attempt $attempt failed, retrying in 30s..."
+            colab stop -s bev-m2 2>/dev/null || true
+            sleep 30
+          done
+
+      - name: Run M2 pipeline
+        timeout-minutes: 150
+        run: |
+          SKIP_FLAG=""
+          if [ "${{ inputs.skip_training }}" == "true" ]; then
+            SKIP_FLAG="--skip_training"
+          fi
+
+          cat > /tmp/m2_launcher.py <<'PYEOF'
+          import os, sys, subprocess, shutil
+          from pathlib import Path
+
+          REPO_URL = "https://github.com/sea-sky-web/BEV_Track-Predict.git"
+          REPO_DIR = Path("/content/BEV_Track-Predict")
+          GDRIVE_FOLDER_ID = "1uBptJBbtMzVRQwSMRbQkIJp8-VVoBqUK"
+
+          def run(cmd, cwd=None, check=True):
+              if isinstance(cmd, str): cmd = cmd.split()
+              print(f"\n>>> {' '.join(str(c) for c in cmd)}", flush=True)
+              env = os.environ.copy()
+              env["PYTHONUNBUFFERED"] = "1"
+              proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT, text=True, bufsize=1)
+              for line in proc.stdout: print(line, end="", flush=True)
+              proc.wait()
+              if check and proc.returncode != 0:
+                  raise subprocess.CalledProcessError(proc.returncode, cmd)
+              return proc.returncode
+
+          # Clone / pull
+          if REPO_DIR.exists() and (REPO_DIR / ".git").exists():
+              run(["git", "-C", str(REPO_DIR), "pull", "--ff-only"], check=False)
+          else:
+              if REPO_DIR.exists(): shutil.rmtree(str(REPO_DIR))
+              run(["git", "clone", REPO_URL, str(REPO_DIR)])
+
+          # Download dataset
+          data_root = REPO_DIR / "wildtrack"
+          if not (data_root / "annotations_positions").exists():
+              run([sys.executable, "-m", "pip", "install", "-q", "gdown==5.2.0"])
+              run([sys.executable, "-m", "gdown", "--folder", "--fuzzy", "--remaining-ok",
+                   f"https://drive.google.com/drive/folders/{GDRIVE_FOLDER_ID}",
+                   "-O", str(REPO_DIR)], check=False)
+              zip_path = REPO_DIR / "wildtrack.zip"
+              if zip_path.exists():
+                  run(["unzip", "-q", str(zip_path), "-d", str(REPO_DIR)])
+                  zip_path.unlink()
+              found = list(REPO_DIR.rglob("annotations_positions"))
+              if not found:
+                  print("[ERROR] annotations_positions not found"); sys.exit(1)
+              actual = found[0].parent
+              if actual != data_root:
+                  if data_root.exists(): shutil.rmtree(str(data_root))
+                  actual.rename(data_root)
+              print(f"[OK] Data ready: {data_root}")
+
+          # Install deps
+          run([sys.executable, "-m", "pip", "install", "-q", "-r",
+               str(REPO_DIR / "requirements.txt")], check=False)
+
+          # Run pipeline
+          cmd = [sys.executable, str(REPO_DIR / "scripts" / "run_m2_pipeline.py"),
+                 "--annotations_dir", str(data_root / "annotations_positions"),
+                 "--output_dir", str(REPO_DIR / "outputs" / "m2_pipeline"),
+                 "--device", "cuda",
+                 "--seed", os.environ.get("M2_SEED", "0")]
+          if os.environ.get("M2_SKIP_TRAINING") == "true":
+              cmd.append("--skip_training")
+          run(cmd, cwd=str(REPO_DIR))
+          print("[OK] Pipeline complete", flush=True)
+          PYEOF
+
+          M2_SEED=${{ inputs.seed }} M2_SKIP_TRAINING=${{ inputs.skip_training }} \
+            colab exec -s bev-m2 --timeout 7200 < /tmp/m2_launcher.py
+
+      - name: Download results
+        if: always()
+        run: |
+          REMOTE="/content/BEV_Track-Predict/outputs/m2_pipeline"
+          colab download -s bev-m2 "$REMOTE/m2_pipeline_results.json" ./m2_pipeline_results.json || true
+          colab download -s bev-m2 "$REMOTE/convlstm_seed${{ inputs.seed }}/best_model.pth" ./best_model.pth || true
+          colab download -s bev-m2 "$REMOTE/convlstm_seed${{ inputs.seed }}/metrics.json" ./convlstm_metrics.json || true
+
+      - name: Print results
+        if: always()
+        run: |
+          if [ -f m2_pipeline_results.json ]; then
+            python3 -c "
+          import json
+          r = json.load(open('m2_pipeline_results.json'))
+          print('=' * 50)
+          print('MODULE 2 PIPELINE RESULTS')
+          print('=' * 50)
+          if 'tracking' in r:
+              print('\nTracking (val):')
+              for n, m in r['tracking'].items():
+                  print(f'  {n:10s}: MOTA={m[\"mota\"]:.4f} IDF1={m[\"idf1\"]:.4f} IDSW={m[\"id_switches\"]}')
+          if 'baselines' in r:
+              print('\nBaselines (val AUPRC):')
+              for n, m in r['baselines'].items():
+                  print(f'  {n:20s}: {m[\"occ_auprc_mean\"]:.4f} ±{m[\"occ_auprc_std\"]:.4f}')
+          if 'convlstm' in r and 'best_auprc' in r.get('convlstm', {}):
+              print(f'\nConvLSTM best val AUPRC: {r[\"convlstm\"][\"best_auprc\"]:.4f}')
+              print(f'Training epochs: {r[\"convlstm\"][\"final_epoch\"]}')
+              print(f'Training time: {r[\"convlstm\"][\"elapsed_s\"]:.0f}s')
+          print('=' * 50)
+          "
+          else
+            echo "[ERROR] m2_pipeline_results.json not found"
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m2-pipeline-run${{ github.run_number }}
+          path: |
+            m2_pipeline_results.json
+            best_model.pth
+            convlstm_metrics.json
+          if-no-files-found: warn
+
+      - name: Stop Colab session
+        if: always()
+        run: colab stop -s bev-m2 || true
