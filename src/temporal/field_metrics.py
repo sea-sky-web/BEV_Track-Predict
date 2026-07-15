@@ -41,9 +41,10 @@ def compute_occupancy_auprc(
     gt: np.ndarray,
     valid_mask: np.ndarray | None = None,
     n_thresholds: int = 100,
+    gt_threshold: float = 1e-3,
 ) -> float:
     pred_f = pred.ravel().astype(np.float64)
-    gt_f = (gt.ravel() > 0.5).astype(np.float64)
+    gt_f = (gt.ravel() > gt_threshold).astype(np.float64)
 
     if valid_mask is not None:
         mask = valid_mask.ravel().astype(bool)
@@ -54,7 +55,8 @@ def compute_occupancy_auprc(
     if n_pos == 0:
         return 0.0
 
-    thresholds = np.linspace(0.0, 1.0, n_thresholds + 1)
+    pred_max = pred_f.max() if pred_f.size > 0 else 1.0
+    thresholds = np.linspace(0.0, max(pred_max, 1e-6), n_thresholds + 1)
     precisions = []
     recalls = []
 
@@ -85,9 +87,10 @@ def compute_occupancy_at_threshold(
     gt: np.ndarray,
     threshold: float = 0.5,
     valid_mask: np.ndarray | None = None,
+    gt_threshold: float = 1e-3,
 ) -> OccupancyMetrics:
     pred_f = pred.ravel().astype(np.float64)
-    gt_f = (gt.ravel() > 0.5).astype(np.float64)
+    gt_f = (gt.ravel() > gt_threshold).astype(np.float64)
 
     if valid_mask is not None:
         mask = valid_mask.ravel().astype(bool)
@@ -108,7 +111,7 @@ def compute_occupancy_at_threshold(
     union = tp + fp + fn
     iou = intersection / union if union > 0 else 0.0
 
-    auprc = compute_occupancy_auprc(pred, gt, valid_mask)
+    auprc = compute_occupancy_auprc(pred, gt, valid_mask, gt_threshold=gt_threshold)
 
     return OccupancyMetrics(
         auprc=auprc, iou=iou, precision=precision, recall=recall, f1=f1, threshold=threshold
