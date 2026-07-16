@@ -222,17 +222,21 @@ jobs:
                  "--annotations_dir", str(data_root / "annotations_positions"),
                  "--output_dir", str(REPO_DIR / "outputs" / "m2_pipeline"),
                  "--device", "cuda",
-                 "--seed", os.environ.get("M2_SEED", "0"),
-                 "--bev_down", os.environ.get("M2_BEV_DOWN", "4")]
+                 "--seed", "PLACEHOLDER_SEED",
+                 "--bev_down", "PLACEHOLDER_BEV_DOWN"]
           cmd.extend(det_flag)
-          if os.environ.get("M2_SKIP_TRAINING") == "true":
+          if "PLACEHOLDER_SKIP" == "true":
               cmd.append("--skip_training")
           run(cmd, cwd=str(REPO_DIR))
           print("[OK] Pipeline complete", flush=True)
           PYEOF
 
-          M2_SEED=${{ inputs.seed }} M2_SKIP_TRAINING=${{ inputs.skip_training }} M2_BEV_DOWN=${{ inputs.bev_down }} \
-            colab exec -s bev-m2 --timeout 7200 < /tmp/m2_launcher.py
+          # Inject actual values into the launcher script (env vars don't pass through colab exec)
+          sed -i "s/PLACEHOLDER_SEED/${{ inputs.seed }}/g" /tmp/m2_launcher.py
+          sed -i "s/PLACEHOLDER_BEV_DOWN/${{ inputs.bev_down }}/g" /tmp/m2_launcher.py
+          sed -i "s/PLACEHOLDER_SKIP/${{ inputs.skip_training }}/g" /tmp/m2_launcher.py
+
+          colab exec -s bev-m2 --timeout 7200 < /tmp/m2_launcher.py
 
       - name: Download results
         if: always()
