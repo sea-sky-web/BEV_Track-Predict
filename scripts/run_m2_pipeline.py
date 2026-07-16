@@ -1,16 +1,20 @@
-"""Module 2 complete pipeline: GT tracking → field mapping → baselines → ConvLSTM.
+"""Module 2 complete pipeline: three-level evaluation framework.
 
-Runs the full GT-based temporal chain on WildTrack annotations:
-  1. Load annotations, build trajectories
-  2. Evaluate tracking (NN + Kalman) on GT detections
-  3. Build occupancy/velocity fields for all frames
-  4. Evaluate non-learning baselines (persistence, constant velocity, advection, oracle)
-  5. Train ConvLSTM and evaluate vs baselines
-  6. Output comprehensive results JSON
+Level 1 (GT):       GT positions + GT identity → pure prediction capability
+Level 2 (Det+GT):   Detector positions + GT association → detection error impact
+Level 3 (Det+Trk):  Detector positions + Tracker → full end-to-end
 
 Usage:
+    # GT-only (no checkpoint needed):
     PYTHONPATH=src python3 scripts/run_m2_pipeline.py \
         --annotations_dir wildtrack/annotations_positions \
+        --output_dir outputs/m2_pipeline \
+        --device cuda
+
+    # Full three-level (needs detector JSONL):
+    PYTHONPATH=src python3 scripts/run_m2_pipeline.py \
+        --annotations_dir wildtrack/annotations_positions \
+        --detections_jsonl outputs/frozen_detector/detections.jsonl \
         --output_dir outputs/m2_pipeline \
         --device cuda
 """
@@ -28,31 +32,33 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import numpy as np
 
-np_rng = np.random.RandomState(0)
-
 
 def banner(msg: str):
     print(f"\n{'=' * 60}\n  {msg}\n{'=' * 60}", flush=True)
 
 
-def run_tracking_eval(annotations_dir: Path, output_dir: Path) -> dict:
-    """Run NN and Kalman trackers on GT detections, evaluate MOTA/IDF1."""
-    from temporal.annotation_reader import load_all_annotations, build_trajectories
+# ── Tracking evaluation ──
+
+def _run_tracker_on_frames(tracker, positions_per_frame, frame_offset):
+    """Run a tracker on per-frame positions, return pred_frames for metric eval."""
+    pred_frames = []
+    for fi, pos in enumerate(positions_per_frame):
+        out = tracker.update(pos, frame_index=frame_offset + fi)
+        if out.active_tracks:
+            pred_pos = np.array([[t.world_x_m, t.world_y_m] for t in out.active_tracks])
+            pred_ids = np.array([t.track_id for t in out.active_tracks], dtype=np.int64)
+        else:
+            pred_pos = np.empty((0, 2))
+            pred_ids = np.array([], dtype=np.int64)
+        pred_frames.append({"positions": pred_pos, "ids": pred_ids})
+    return pred_frames
+
+
+def eval_tracking(gt_frames_data, input_positions, frame_offset, level_name):
+    """Evaluate NN + Kalman tracking on given input positions."""
     from temporal.tracker_nn import NearestNeighborTracker
     from temporal.tracker_kalman import KalmanHungarianTracker
     from temporal.tracking_metrics import evaluate_tracking
-    from temporal.time_utils import get_split_range
-
-    val_start, val_end = get_split_range("val")
-    frames = load_all_annotations(annotations_dir, frame_start=val_start, max_frames=val_end - val_start)
-
-    gt_frames = []
-    det_frames = []
-    for fi, frame_dets in enumerate(frames):
-        positions = np.array([[d.world_x_m, d.world_y_m] for d in frame_dets]) if frame_dets else np.empty((0, 2))
-        ids = np.array([d.person_id for d in frame_dets]) if frame_dets else np.array([], dtype=np.int64)
-        gt_frames.append({"positions": positions, "ids": ids})
-        det_frames.append(positions)
 
     results = {}
     for tracker_name, tracker_cls, params in [
@@ -60,136 +66,88 @@ def run_tracking_eval(annotations_dir: Path, output_dir: Path) -> dict:
         ("kalman", KalmanHungarianTracker, {"dist_gate": 1.0, "max_age": 2, "min_hits": 2}),
     ]:
         tracker = tracker_cls(**params)
-        pred_frames = []
-        for fi, dets in enumerate(det_frames):
-            out = tracker.update(dets, frame_index=val_start + fi)
-            pred_pos = np.array([[t.world_x_m, t.world_y_m] for t in out.active_tracks]) if out.active_tracks else np.empty((0, 2))
-            pred_ids = np.array([t.track_id for t in out.active_tracks]) if out.active_tracks else np.array([], dtype=np.int64)
-            pred_frames.append({"positions": pred_pos, "ids": pred_ids})
-
-        metrics = evaluate_tracking(gt_frames, pred_frames, dist_thr=0.5)
+        pred_frames = _run_tracker_on_frames(tracker, input_positions, frame_offset)
+        metrics = evaluate_tracking(gt_frames_data, pred_frames, dist_thr=0.5)
         results[tracker_name] = {
             "mota": metrics.mota, "idf1": metrics.idf1,
             "id_switches": metrics.id_switches, "fragmentations": metrics.fragmentations,
             "tp": metrics.tp, "fp": metrics.fp, "fn": metrics.fn,
         }
-        print(f"  [{tracker_name}] MOTA={metrics.mota:.4f} IDF1={metrics.idf1:.4f} "
-              f"IDSW={metrics.id_switches} Frag={metrics.fragmentations}")
-
+        print(f"  [{level_name}/{tracker_name}] MOTA={metrics.mota:.4f} IDF1={metrics.idf1:.4f} "
+              f"IDSW={metrics.id_switches} TP={metrics.tp} FP={metrics.fp} FN={metrics.fn}")
     return results
 
 
-def build_all_frame_fields(annotations_dir: Path, start: int, n_frames: int, sigma_m: float) -> np.ndarray:
-    """Build field tensors for a range of frames."""
-    from temporal.annotation_reader import load_all_annotations, build_trajectories, compute_velocities
+# ── Field construction ──
+
+def build_fields_from_positions(positions_per_frame, velocities_per_frame, sigma_m, scores_per_frame=None):
+    """Build field tensors from per-frame positions and velocities."""
     from temporal.field_builder import build_all_fields
-    from temporal.time_utils import DT
 
-    frames = load_all_annotations(annotations_dir, frame_start=start, max_frames=n_frames)
-    trajectories = build_trajectories(frames)
-
-    person_velocities: dict[int, dict[int, np.ndarray]] = {}
-    for pid, traj in trajectories.items():
-        vel = compute_velocities(traj, dt=DT)
-        for i, det in enumerate(traj.detections):
-            if det.frame_index not in person_velocities:
-                person_velocities[det.frame_index] = {}
-            person_velocities[det.frame_index][pid] = vel[i]
-
+    n_frames = len(positions_per_frame)
     all_fields = np.zeros((n_frames, 5, 120, 360), dtype=np.float32)
     for fi in range(n_frames):
-        abs_fi = start + fi
-        dets = frames[fi]
-        if not dets:
-            continue
-        positions = np.array([[d.world_x_m, d.world_y_m] for d in dets])
-        velocities = np.zeros((len(dets), 2), dtype=np.float64)
-        for j, d in enumerate(dets):
-            vel_map = person_velocities.get(d.frame_index, {})
-            if d.person_id in vel_map:
-                velocities[j] = vel_map[d.person_id]
-        all_fields[fi] = build_all_fields(positions, velocities, sigma_m=sigma_m)
-
+        pos = positions_per_frame[fi]
+        vel = velocities_per_frame[fi] if velocities_per_frame[fi] is not None else np.zeros_like(pos)
+        scores = scores_per_frame[fi] if scores_per_frame is not None else None
+        if pos.shape[0] > 0:
+            all_fields[fi] = build_all_fields(pos, vel, sigma_m=sigma_m, scores=scores)
     return all_fields
 
 
-def eval_baselines(annotations_dir: Path, sigma_m: float) -> dict:
-    """Evaluate non-learning baselines on validation split."""
-    from temporal.baselines import (
-        predict_persistence, predict_constant_velocity,
-        predict_field_advection, predict_oracle,
-    )
-    from temporal.field_metrics import compute_occupancy_auprc, compute_velocity_epe
-    from temporal.annotation_reader import load_all_annotations, build_trajectories, compute_velocities
-    from temporal.time_utils import get_split_range, DT
+def compute_velocities_from_positions(positions_per_frame, dt=0.5):
+    """Estimate velocities from consecutive frame positions using nearest-neighbor matching."""
+    n = len(positions_per_frame)
+    velocities = [np.zeros_like(positions_per_frame[i]) for i in range(n)]
 
-    val_start, val_end = get_split_range("val")
-    n_val = val_end - val_start
-    history_len = 4
-    future_len = 4
+    for fi in range(1, n):
+        prev_pos = positions_per_frame[fi - 1]
+        curr_pos = positions_per_frame[fi]
+        if prev_pos.shape[0] == 0 or curr_pos.shape[0] == 0:
+            continue
 
-    fields = build_all_frame_fields(annotations_dir, val_start, n_val, sigma_m)
-    frames = load_all_annotations(annotations_dir, frame_start=val_start, max_frames=n_val)
-    trajectories = build_trajectories(frames)
+        # Simple nearest-neighbor velocity estimation
+        dists = np.linalg.norm(curr_pos[:, None, :] - prev_pos[None, :, :], axis=2)
+        vel = np.zeros_like(curr_pos)
+        for ci in range(curr_pos.shape[0]):
+            pi = np.argmin(dists[ci])
+            if dists[ci, pi] < 1.0:  # max 1m displacement at 2Hz = 2m/s
+                vel[ci] = (curr_pos[ci] - prev_pos[pi]) / dt
+        velocities[fi] = vel
 
-    person_velocities: dict[int, dict[int, np.ndarray]] = {}
-    for pid, traj in trajectories.items():
-        vel = compute_velocities(traj, dt=DT)
-        for i, det in enumerate(traj.detections):
-            if det.frame_index not in person_velocities:
-                person_velocities[det.frame_index] = {}
-            person_velocities[det.frame_index][pid] = vel[i]
+    return velocities
 
+
+# ── Baseline evaluation ──
+
+def eval_baselines_on_fields(fields, n_history, n_future, sigma_m, label):
+    """Evaluate non-learning baselines on prebuilt fields."""
+    from temporal.baselines import predict_persistence, predict_field_advection
+    from temporal.field_metrics import compute_occupancy_auprc
+
+    n_frames = fields.shape[0]
+    n_windows = n_frames - n_history - n_future + 1
     results = {}
-    n_windows = n_val - history_len - future_len + 1
 
-    for baseline_name in ["persistence", "constant_velocity", "advection", "oracle"]:
+    for baseline_name in ["persistence", "advection"]:
         auprc_list = []
-        epe_list = []
-
         for wi in range(max(n_windows, 1)):
-            t_now = history_len + wi - 1
-            if t_now + future_len > n_val:
+            t_now = n_history + wi - 1
+            if t_now + n_future >= n_frames:
                 break
 
             current_occ = fields[t_now, 0]
             current_vx = fields[t_now, 1]
             current_vy = fields[t_now, 2]
 
-            gt_future = [fields[t_now + 1 + s, 0] for s in range(future_len)]
-            gt_future_vx = [fields[t_now + 1 + s, 1] for s in range(future_len)]
-            gt_future_vy = [fields[t_now + 1 + s, 2] for s in range(future_len)]
-
             if baseline_name == "persistence":
-                preds = predict_persistence(current_occ, future_len)
-            elif baseline_name == "constant_velocity":
-                dets = frames[t_now]
-                if dets:
-                    pos = np.array([[d.world_x_m, d.world_y_m] for d in dets])
-                    vels = np.zeros((len(dets), 2), dtype=np.float64)
-                    for j, d in enumerate(dets):
-                        vm = person_velocities.get(d.frame_index, {})
-                        if d.person_id in vm:
-                            vels[j] = vm[d.person_id]
-                    preds = predict_constant_velocity(pos, vels, future_len, dt=DT, sigma_m=sigma_m)
-                else:
-                    preds = [np.zeros((120, 360), dtype=np.float32)] * future_len
+                preds = predict_persistence(current_occ, n_future)
             elif baseline_name == "advection":
-                preds = predict_field_advection(current_occ, current_vx, current_vy, future_len)
-            elif baseline_name == "oracle":
-                future_positions = []
-                for s in range(future_len):
-                    fi = t_now + 1 + s
-                    if fi < n_val:
-                        dets_f = frames[fi]
-                        pos_f = np.array([[d.world_x_m, d.world_y_m] for d in dets_f]) if dets_f else np.empty((0, 2))
-                    else:
-                        pos_f = np.empty((0, 2))
-                    future_positions.append(pos_f)
-                preds = predict_oracle(future_positions, sigma_m=sigma_m)
+                preds = predict_field_advection(current_occ, current_vx, current_vy, n_future)
 
-            for s in range(future_len):
-                auprc = compute_occupancy_auprc(preds[s], gt_future[s])
+            for s in range(n_future):
+                gt_occ = fields[t_now + 1 + s, 0]
+                auprc = compute_occupancy_auprc(preds[s], gt_occ)
                 auprc_list.append(auprc)
 
         results[baseline_name] = {
@@ -197,15 +155,16 @@ def eval_baselines(annotations_dir: Path, sigma_m: float) -> dict:
             "occ_auprc_std": float(np.std(auprc_list)) if auprc_list else 0.0,
             "n_evaluations": len(auprc_list),
         }
-        print(f"  [{baseline_name}] AUPRC={results[baseline_name]['occ_auprc_mean']:.4f} "
-              f"±{results[baseline_name]['occ_auprc_std']:.4f} (n={len(auprc_list)})")
+        print(f"  [{label}/{baseline_name}] AUPRC={results[baseline_name]['occ_auprc_mean']:.4f} "
+              f"±{results[baseline_name]['occ_auprc_std']:.4f}")
 
     return results
 
 
-def train_and_eval_convlstm(annotations_dir: Path, output_dir: Path,
-                            device_str: str, seed: int, sigma_m: float) -> dict:
-    """Train ConvLSTM and evaluate on validation split."""
+# ── ConvLSTM training ──
+
+def train_convlstm(annotations_dir, output_dir, device_str, seed, sigma_m):
+    """Train ConvLSTM on GT fields and evaluate."""
     import torch
     from torch.utils.data import DataLoader
     from temporal.convlstm import SpatioTemporalPredictor
@@ -274,9 +233,13 @@ def train_and_eval_convlstm(annotations_dir: Path, output_dir: Path,
     }
 
 
+# ── Main ──
+
 def main():
-    parser = argparse.ArgumentParser(description="Run Module 2 complete pipeline")
+    parser = argparse.ArgumentParser(description="Run Module 2 three-level evaluation pipeline")
     parser.add_argument("--annotations_dir", type=str, required=True)
+    parser.add_argument("--detections_jsonl", type=str, default=None,
+                        help="Detector JSONL output (enables Level 2 & 3 evaluation)")
     parser.add_argument("--output_dir", type=str, default="outputs/m2_pipeline")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--sigma_m", type=float, default=0.2)
@@ -288,43 +251,127 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    from temporal.annotation_reader import load_all_annotations, build_trajectories, compute_velocities
+    from temporal.time_utils import get_split_range, DT
+
     all_results = {}
 
-    # ── 1. Tracking evaluation ──
-    banner("1/4  Tracking Evaluation (GT detections, val split)")
-    all_results["tracking"] = run_tracking_eval(ann_dir, output_dir)
+    # ────────────────────────────────────────────
+    # LEVEL 1: GT positions + GT identity
+    # ────────────────────────────────────────────
+    banner("LEVEL 1: GT positions + GT identity")
 
-    # ── 2. Field construction stats ──
-    banner("2/4  Field Construction Stats")
-    from temporal.time_utils import get_split_range
-    for split in ["train", "val", "test"]:
-        s, e = get_split_range(split)
-        fields = build_all_frame_fields(ann_dir, s, e - s, args.sigma_m)
-        occ_mean = fields[:, 0].mean()
-        occ_max = fields[:, 0].max()
-        vel_mean = np.sqrt(fields[:, 1] ** 2 + fields[:, 2] ** 2).mean()
-        print(f"  [{split}] frames={e - s}, occ_mean={occ_mean:.6f}, "
-              f"occ_max={occ_max:.4f}, vel_mean={vel_mean:.4f} m/s")
-        all_results[f"fields_{split}"] = {
-            "n_frames": e - s,
-            "occ_mean": float(occ_mean),
-            "occ_max": float(occ_max),
-            "vel_mean": float(vel_mean),
-        }
+    val_start, val_end = get_split_range("val")
+    n_val = val_end - val_start
+    frames_val = load_all_annotations(ann_dir, frame_start=val_start, max_frames=n_val)
+    trajectories_val = build_trajectories(frames_val)
 
-    # ── 3. Non-learning baselines ──
-    banner("3/4  Non-Learning Baselines (val split)")
-    all_results["baselines"] = eval_baselines(ann_dir, args.sigma_m)
+    # GT positions and IDs
+    gt_frames_data = []
+    gt_positions_val = []
+    for frame_dets in frames_val:
+        pos = np.array([[d.world_x_m, d.world_y_m] for d in frame_dets]) if frame_dets else np.empty((0, 2))
+        ids = np.array([d.person_id for d in frame_dets], dtype=np.int64) if frame_dets else np.array([], dtype=np.int64)
+        gt_frames_data.append({"positions": pos, "ids": ids})
+        gt_positions_val.append(pos)
 
-    # ── 4. ConvLSTM training ──
+    # L1 Tracking (GT → tracker → evaluate)
+    print("\n  [L1] Tracking evaluation...")
+    all_results["L1_tracking"] = eval_tracking(gt_frames_data, gt_positions_val, val_start, "L1")
+
+    # L1 Field construction + baselines
+    print("\n  [L1] Building GT fields...")
+    person_vel = {}
+    for pid, traj in trajectories_val.items():
+        vel = compute_velocities(traj, dt=DT)
+        for i, det in enumerate(traj.detections):
+            if det.frame_index not in person_vel:
+                person_vel[det.frame_index] = {}
+            person_vel[det.frame_index][pid] = vel[i]
+
+    gt_vel_val = []
+    for fi, frame_dets in enumerate(frames_val):
+        if not frame_dets:
+            gt_vel_val.append(np.empty((0, 2)))
+            continue
+        vels = np.zeros((len(frame_dets), 2), dtype=np.float64)
+        for j, d in enumerate(frame_dets):
+            vm = person_vel.get(d.frame_index, {})
+            if d.person_id in vm:
+                vels[j] = vm[d.person_id]
+        gt_vel_val.append(vels)
+
+    gt_fields = build_fields_from_positions(gt_positions_val, gt_vel_val, args.sigma_m)
+
+    print(f"  [L1] Fields: occ_mean={gt_fields[:, 0].mean():.6f}, "
+          f"occ_max={gt_fields[:, 0].max():.4f}, "
+          f"vel_mean={np.sqrt(gt_fields[:, 1]**2 + gt_fields[:, 2]**2).mean():.4f}")
+
+    print("\n  [L1] Baseline evaluation...")
+    all_results["L1_baselines"] = eval_baselines_on_fields(gt_fields, 4, 4, args.sigma_m, "L1")
+
+    # L1 ConvLSTM training
     if not args.skip_training:
-        banner("4/4  ConvLSTM Training (full ablation, seed={})".format(args.seed))
-        all_results["convlstm"] = train_and_eval_convlstm(
-            ann_dir, output_dir, args.device, args.seed, args.sigma_m
-        )
+        print("\n  [L1] ConvLSTM training...")
+        all_results["L1_convlstm"] = train_convlstm(ann_dir, output_dir, args.device, args.seed, args.sigma_m)
     else:
-        print("\n[SKIP] ConvLSTM training skipped (--skip_training)")
-        all_results["convlstm"] = {"skipped": True}
+        all_results["L1_convlstm"] = {"skipped": True}
+
+    # ────────────────────────────────────────────
+    # LEVEL 2 & 3: Detector-driven (if JSONL provided)
+    # ────────────────────────────────────────────
+    if args.detections_jsonl:
+        from temporal.detection_loader import (
+            load_detections_jsonl, detections_to_positions,
+            detections_to_scores, match_detections_to_gt,
+        )
+
+        banner("LEVEL 2: Detector positions + GT association")
+        det_by_frame = load_detections_jsonl(Path(args.detections_jsonl))
+        det_positions_val = detections_to_positions(det_by_frame, val_start, n_val)
+        det_scores_val = detections_to_scores(det_by_frame, val_start, n_val)
+
+        # L2: Match detections to GT (Hungarian), assign GT identity
+        l2_positions_val = []
+        l2_gt_frames = []
+        for fi in range(n_val):
+            matched_pos, matched_ids = match_detections_to_gt(
+                det_positions_val[fi], gt_frames_data[fi]["positions"],
+                gt_frames_data[fi]["ids"], dist_thr=0.5
+            )
+            l2_positions_val.append(matched_pos)
+            l2_gt_frames.append({"positions": matched_pos, "ids": matched_ids})
+
+        print("\n  [L2] Tracking evaluation (det positions + GT IDs)...")
+        all_results["L2_tracking"] = eval_tracking(gt_frames_data, [f["positions"] for f in l2_gt_frames], val_start, "L2")
+
+        print("\n  [L2] Building detector fields (GT-associated)...")
+        l2_vel = compute_velocities_from_positions(l2_positions_val, dt=DT)
+        l2_fields = build_fields_from_positions(l2_positions_val, l2_vel, args.sigma_m)
+        print(f"  [L2] Fields: occ_mean={l2_fields[:, 0].mean():.6f}, "
+              f"occ_max={l2_fields[:, 0].max():.4f}")
+
+        print("\n  [L2] Baseline evaluation...")
+        all_results["L2_baselines"] = eval_baselines_on_fields(l2_fields, 4, 4, args.sigma_m, "L2")
+
+        # ──────────────────────────
+        banner("LEVEL 3: Detector positions + Tracker")
+
+        print("\n  [L3] Tracking evaluation (det positions + tracker IDs)...")
+        all_results["L3_tracking"] = eval_tracking(gt_frames_data, det_positions_val, val_start, "L3")
+
+        print("\n  [L3] Building detector+tracker fields...")
+        l3_vel = compute_velocities_from_positions(det_positions_val, dt=DT)
+        l3_fields = build_fields_from_positions(det_positions_val, l3_vel, args.sigma_m,
+                                                scores_per_frame=det_scores_val)
+        print(f"  [L3] Fields: occ_mean={l3_fields[:, 0].mean():.6f}, "
+              f"occ_max={l3_fields[:, 0].max():.4f}")
+
+        print("\n  [L3] Baseline evaluation...")
+        all_results["L3_baselines"] = eval_baselines_on_fields(l3_fields, 4, 4, args.sigma_m, "L3")
+    else:
+        print("\n[INFO] No --detections_jsonl provided. Skipping Level 2 & 3.")
+        print("[INFO] To enable: run export_detections_jsonl.py first, then pass the JSONL path.")
 
     # ── Summary ──
     banner("RESULTS SUMMARY")
@@ -333,18 +380,24 @@ def main():
         json.dump(all_results, f, indent=2)
     print(f"\nResults saved to {results_path}")
 
-    if "baselines" in all_results:
-        print("\n  Non-learning baselines (val AUPRC):")
-        for name, m in all_results["baselines"].items():
-            print(f"    {name:20s}: {m['occ_auprc_mean']:.4f} ±{m['occ_auprc_std']:.4f}")
+    # Print comparison table
+    print("\n  Tracking comparison (val split, Kalman tracker):")
+    for level in ["L1", "L2", "L3"]:
+        key = f"{level}_tracking"
+        if key in all_results and "kalman" in all_results[key]:
+            m = all_results[key]["kalman"]
+            print(f"    {level}: MOTA={m['mota']:.4f} IDF1={m['idf1']:.4f} "
+                  f"IDSW={m['id_switches']} TP={m['tp']} FP={m['fp']} FN={m['fn']}")
 
-    if "convlstm" in all_results and "best_auprc" in all_results["convlstm"]:
-        print(f"\n  ConvLSTM (best val AUPRC): {all_results['convlstm']['best_auprc']:.4f}")
+    print("\n  Baselines comparison (val AUPRC, persistence):")
+    for level in ["L1", "L2", "L3"]:
+        key = f"{level}_baselines"
+        if key in all_results and "persistence" in all_results[key]:
+            m = all_results[key]["persistence"]
+            print(f"    {level}: {m['occ_auprc_mean']:.4f} ±{m['occ_auprc_std']:.4f}")
 
-    if "tracking" in all_results:
-        print("\n  Tracking (val split):")
-        for name, m in all_results["tracking"].items():
-            print(f"    {name:10s}: MOTA={m['mota']:.4f} IDF1={m['idf1']:.4f}")
+    if "L1_convlstm" in all_results and "best_auprc" in all_results.get("L1_convlstm", {}):
+        print(f"\n  ConvLSTM (L1, best val AUPRC): {all_results['L1_convlstm']['best_auprc']:.4f}")
 
     print("\n[DONE] Pipeline complete", flush=True)
 

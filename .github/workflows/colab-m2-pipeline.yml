@@ -15,6 +15,10 @@ on:
         description: '跳过 ConvLSTM 训练（仅运行 tracking + baselines）'
         default: 'false'
         required: false
+      train_run_id:
+        description: '训练 run ID（下载 M1 checkpoint，启用 Level 2&3 评估）'
+        default: ''
+        required: false
 
 jobs:
   pipeline:
@@ -73,6 +77,55 @@ jobs:
             colab stop -s bev-m2 2>/dev/null || true
             sleep 30
           done
+
+      - name: Download M1 checkpoint (for Level 2&3)
+        if: inputs.train_run_id != ''
+        run: |
+          echo "Downloading M1 checkpoint from run ${{ inputs.train_run_id }}..."
+          gh run download ${{ inputs.train_run_id }} -D /tmp/m1_ckpt --repo ${{ github.repository }} 2>&1 || true
+          CKPT=$(find /tmp/m1_ckpt -name 'model_final.pth' -type f 2>/dev/null | head -1)
+          if [ -n "$CKPT" ]; then
+            cp "$CKPT" ./model_final.pth
+            echo "[OK] M1 checkpoint downloaded ($(du -h ./model_final.pth | cut -f1))"
+          else
+            echo "[WARN] model_final.pth not found, Level 2&3 will be skipped"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Upload M1 checkpoint to Colab
+        if: inputs.train_run_id != ''
+        run: |
+          if [ ! -f model_final.pth ]; then
+            echo "[SKIP] No checkpoint to upload"
+            exit 0
+          fi
+          REMOTE="/content/BEV_Track-Predict/outputs/frozen_detector"
+          echo "import os; os.makedirs('$REMOTE', exist_ok=True)" | colab exec -s bev-m2
+
+          CHUNK_DIR=/tmp/m1_chunks
+          mkdir -p "$CHUNK_DIR"
+          split -b 8m ./model_final.pth "$CHUNK_DIR/chunk_"
+          echo "import os; os.makedirs('$REMOTE/_chunks', exist_ok=True)" | colab exec -s bev-m2
+
+          for part in "$CHUNK_DIR"/chunk_*; do
+            name=$(basename "$part")
+            for attempt in 1 2 3; do
+              colab upload -s bev-m2 "$part" "$REMOTE/_chunks/$name" && break
+              sleep 10
+            done
+          done
+
+          echo "import glob, shutil
+          parts = sorted(glob.glob('$REMOTE/_chunks/chunk_*'))
+          with open('$REMOTE/model_final.pth', 'wb') as out:
+              for p in parts:
+                  with open(p, 'rb') as f:
+                      shutil.copyfileobj(f, out)
+          shutil.rmtree('$REMOTE/_chunks')
+          import os; print(f'[OK] Reassembled {len(parts)} chunks, {os.path.getsize(\"$REMOTE/model_final.pth\")/1e6:.1f} MB')
+          " | colab exec -s bev-m2
+          echo "[OK] M1 checkpoint uploaded"
 
       - name: Run M2 pipeline
         timeout-minutes: 150
@@ -134,12 +187,39 @@ jobs:
           run([sys.executable, "-m", "pip", "install", "-q", "-r",
                str(REPO_DIR / "requirements.txt")], check=False)
 
+          # Export M1 detections if checkpoint exists
+          ckpt_path = REPO_DIR / "outputs" / "frozen_detector" / "model_final.pth"
+          jsonl_path = REPO_DIR / "outputs" / "frozen_detector" / "detections.jsonl"
+          det_flag = []
+          if ckpt_path.exists():
+              print(f"\n[M1] Exporting detections from {ckpt_path}...")
+              export_cmd = [
+                  sys.executable, str(REPO_DIR / "scripts" / "export_detections_jsonl.py"),
+                  "--data_root", str(data_root),
+                  "--model_path", str(ckpt_path),
+                  "--output", str(jsonl_path),
+                  "--device", "cuda",
+                  "--backbone", "mobilenet_v2",
+                  "--fusion_mode", "geo_confidence_v1",
+                  "--frame_start", "0",
+                  "--max_frames", "400",
+              ]
+              ret = run(export_cmd, cwd=str(REPO_DIR), check=False)
+              if ret == 0 and jsonl_path.exists():
+                  print(f"[OK] Detections exported: {jsonl_path}")
+                  det_flag = ["--detections_jsonl", str(jsonl_path)]
+              else:
+                  print("[WARN] Detection export failed, running Level 1 only")
+          else:
+              print("[INFO] No M1 checkpoint found, running Level 1 only")
+
           # Run pipeline
           cmd = [sys.executable, str(REPO_DIR / "scripts" / "run_m2_pipeline.py"),
                  "--annotations_dir", str(data_root / "annotations_positions"),
                  "--output_dir", str(REPO_DIR / "outputs" / "m2_pipeline"),
                  "--device", "cuda",
                  "--seed", os.environ.get("M2_SEED", "0")]
+          cmd.extend(det_flag)
           if os.environ.get("M2_SKIP_TRAINING") == "true":
               cmd.append("--skip_training")
           run(cmd, cwd=str(REPO_DIR))
@@ -167,18 +247,19 @@ jobs:
           print('=' * 50)
           print('MODULE 2 PIPELINE RESULTS')
           print('=' * 50)
-          if 'tracking' in r:
-              print('\nTracking (val):')
-              for n, m in r['tracking'].items():
-                  print(f'  {n:10s}: MOTA={m[\"mota\"]:.4f} IDF1={m[\"idf1\"]:.4f} IDSW={m[\"id_switches\"]}')
-          if 'baselines' in r:
-              print('\nBaselines (val AUPRC):')
-              for n, m in r['baselines'].items():
-                  print(f'  {n:20s}: {m[\"occ_auprc_mean\"]:.4f} ±{m[\"occ_auprc_std\"]:.4f}')
-          if 'convlstm' in r and 'best_auprc' in r.get('convlstm', {}):
-              print(f'\nConvLSTM best val AUPRC: {r[\"convlstm\"][\"best_auprc\"]:.4f}')
-              print(f'Training epochs: {r[\"convlstm\"][\"final_epoch\"]}')
-              print(f'Training time: {r[\"convlstm\"][\"elapsed_s\"]:.0f}s')
+          for level in ['L1', 'L2', 'L3']:
+              tk = f'{level}_tracking'
+              if tk in r and 'kalman' in r[tk]:
+                  m = r[tk]['kalman']
+                  print(f'{level} Tracking: MOTA={m[\"mota\"]:.4f} IDF1={m[\"idf1\"]:.4f} IDSW={m[\"id_switches\"]}')
+          print()
+          for level in ['L1', 'L2', 'L3']:
+              bk = f'{level}_baselines'
+              if bk in r and 'persistence' in r[bk]:
+                  m = r[bk]['persistence']
+                  print(f'{level} Baseline (persistence): AUPRC={m[\"occ_auprc_mean\"]:.4f}')
+          if 'L1_convlstm' in r and 'best_auprc' in r.get('L1_convlstm', {}):
+              print(f'\nConvLSTM best val AUPRC: {r[\"L1_convlstm\"][\"best_auprc\"]:.4f}')
           print('=' * 50)
           "
           else
