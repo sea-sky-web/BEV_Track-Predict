@@ -15,6 +15,10 @@ on:
         description: '跳过 ConvLSTM 训练（仅运行 tracking + baselines）'
         default: 'false'
         required: false
+      bev_down:
+        description: 'BEV 网格降采样倍数 (4=0.1m, 8=0.2m, 16=0.4m)'
+        default: '4'
+        required: false
       train_run_id:
         description: '训练 run ID（下载 M1 checkpoint，启用 Level 2&3 评估）'
         default: ''
@@ -218,7 +222,8 @@ jobs:
                  "--annotations_dir", str(data_root / "annotations_positions"),
                  "--output_dir", str(REPO_DIR / "outputs" / "m2_pipeline"),
                  "--device", "cuda",
-                 "--seed", os.environ.get("M2_SEED", "0")]
+                 "--seed", os.environ.get("M2_SEED", "0"),
+                 "--bev_down", os.environ.get("M2_BEV_DOWN", "4")]
           cmd.extend(det_flag)
           if os.environ.get("M2_SKIP_TRAINING") == "true":
               cmd.append("--skip_training")
@@ -226,7 +231,7 @@ jobs:
           print("[OK] Pipeline complete", flush=True)
           PYEOF
 
-          M2_SEED=${{ inputs.seed }} M2_SKIP_TRAINING=${{ inputs.skip_training }} \
+          M2_SEED=${{ inputs.seed }} M2_SKIP_TRAINING=${{ inputs.skip_training }} M2_BEV_DOWN=${{ inputs.bev_down }} \
             colab exec -s bev-m2 --timeout 7200 < /tmp/m2_launcher.py
 
       - name: Download results

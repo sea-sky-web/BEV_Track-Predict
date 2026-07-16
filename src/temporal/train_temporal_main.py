@@ -43,6 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--history_len", type=int, default=4)
     parser.add_argument("--future_len", type=int, default=4)
     parser.add_argument("--sigma_m", type=float, default=0.2)
+    parser.add_argument("--bev_down", type=int, default=4,
+                        help="BEV grid downsampling factor (4=0.1m, 8=0.2m, 16=0.4m)")
 
     parser.add_argument("--hidden_channels", type=int, default=32)
     parser.add_argument("--kernel_size", type=int, default=3)
@@ -67,21 +69,23 @@ def main() -> None:
 
     print(f"[CFG] seed={args.seed} device={device} ablation={args.ablation}")
     print(f"[CFG] epochs={args.epochs} batch={args.batch} lr={args.lr} wd={args.weight_decay}")
-    print(f"[CFG] history={args.history_len} future={args.future_len} sigma_m={args.sigma_m}")
+    print(f"[CFG] history={args.history_len} future={args.future_len} sigma_m={args.sigma_m} bev_down={args.bev_down}")
 
     ann_dir = Path(args.annotations_dir)
     print("[DATA] Loading train split...")
     train_ds = FieldSequenceDataset(ann_dir, split="train",
                                     history_len=args.history_len,
                                     future_len=args.future_len,
-                                    sigma_m=args.sigma_m)
+                                    sigma_m=args.sigma_m,
+                                    bev_down=args.bev_down)
     print(f"[DATA] Train: {len(train_ds)} windows")
 
     print("[DATA] Loading val split...")
     val_ds = FieldSequenceDataset(ann_dir, split="val",
                                   history_len=args.history_len,
                                   future_len=args.future_len,
-                                  sigma_m=args.sigma_m)
+                                  sigma_m=args.sigma_m,
+                                  bev_down=args.bev_down)
     print(f"[DATA] Val: {len(val_ds)} windows")
 
     train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True,
@@ -105,6 +109,7 @@ def main() -> None:
         lambda_vel=args.lambda_vel,
         lambda_trace=args.lambda_trace,
         ablation=args.ablation,
+        bev_down=args.bev_down,
     )
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)

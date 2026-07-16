@@ -31,6 +31,7 @@ class FieldSequenceDataset(Dataset):
         history_len: int = 4,
         future_len: int = 4,
         sigma_m: float = 0.2,
+        bev_down: int = 4,
     ):
         annotations_dir = Path(annotations_dir)
         start, end = get_split_range(split)
@@ -47,7 +48,9 @@ class FieldSequenceDataset(Dataset):
                     person_velocities[det.frame_index] = {}
                 person_velocities[det.frame_index][pid] = vel[i]
 
-        all_fields = np.zeros((n_frames, 5, 120, 360), dtype=np.float32)
+        from temporal.coordinates import grid_shape_reduced
+        gh, gw = grid_shape_reduced(bev_down)
+        all_fields = np.zeros((n_frames, 5, gh, gw), dtype=np.float32)
         for fi in range(n_frames):
             abs_fi = start + fi
             dets = frames[fi]
@@ -62,7 +65,7 @@ class FieldSequenceDataset(Dataset):
                 if d.person_id in vel_map:
                     velocities[j] = vel_map[d.person_id]
 
-            all_fields[fi] = build_all_fields(positions, velocities, sigma_m=sigma_m)
+            all_fields[fi] = build_all_fields(positions, velocities, sigma_m=sigma_m, bev_down=bev_down)
 
         self.fields = all_fields
         self.windows = make_temporal_windows(n_frames, history_len, future_len, frame_offset=0)

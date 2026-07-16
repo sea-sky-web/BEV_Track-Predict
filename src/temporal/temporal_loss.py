@@ -117,15 +117,19 @@ class CombinedTemporalLoss(nn.Module):
         ablation: str = "full",
         dt: float = 0.5,
         cell_m: float = 0.1,
+        bev_down: int = 4,
     ):
         super().__init__()
         self.lambda_vel = lambda_vel
         self.lambda_trace = lambda_trace
         self.ablation = ablation
 
+        from config import STEP_M
+        actual_cell_m = STEP_M * bev_down
+
         self.occ_loss = OccupancyLoss()
         self.vel_loss = VelocityLoss()
-        self.trace_loss = TraceConsistencyLoss(dt=dt, cell_m=cell_m)
+        self.trace_loss = TraceConsistencyLoss(dt=dt, cell_m=actual_cell_m)
 
     def forward(
         self,

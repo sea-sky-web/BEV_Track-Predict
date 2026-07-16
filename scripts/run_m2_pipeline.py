@@ -80,18 +80,20 @@ def eval_tracking(gt_frames_data, input_positions, frame_offset, level_name):
 
 # ── Field construction ──
 
-def build_fields_from_positions(positions_per_frame, velocities_per_frame, sigma_m, scores_per_frame=None):
+def build_fields_from_positions(positions_per_frame, velocities_per_frame, sigma_m, bev_down=4, scores_per_frame=None):
     """Build field tensors from per-frame positions and velocities."""
     from temporal.field_builder import build_all_fields
+    from temporal.coordinates import grid_shape_reduced
 
     n_frames = len(positions_per_frame)
-    all_fields = np.zeros((n_frames, 5, 120, 360), dtype=np.float32)
+    gh, gw = grid_shape_reduced(bev_down)
+    all_fields = np.zeros((n_frames, 5, gh, gw), dtype=np.float32)
     for fi in range(n_frames):
         pos = positions_per_frame[fi]
         vel = velocities_per_frame[fi] if velocities_per_frame[fi] is not None else np.zeros_like(pos)
         scores = scores_per_frame[fi] if scores_per_frame is not None else None
         if pos.shape[0] > 0:
-            all_fields[fi] = build_all_fields(pos, vel, sigma_m=sigma_m, scores=scores)
+            all_fields[fi] = build_all_fields(pos, vel, sigma_m=sigma_m, scores=scores, bev_down=bev_down)
     return all_fields
 
 
@@ -163,7 +165,7 @@ def eval_baselines_on_fields(fields, n_history, n_future, sigma_m, label):
 
 # ── ConvLSTM training ──
 
-def train_convlstm(annotations_dir, output_dir, device_str, seed, sigma_m):
+def train_convlstm(annotations_dir, output_dir, device_str, seed, sigma_m, bev_down=4):
     """Train ConvLSTM on GT fields and evaluate."""
     import torch
     from torch.utils.data import DataLoader
@@ -178,9 +180,11 @@ def train_convlstm(annotations_dir, output_dir, device_str, seed, sigma_m):
 
     print(f"  Loading datasets (seed={seed})...")
     train_ds = FieldSequenceDataset(annotations_dir, split="train",
-                                    history_len=4, future_len=4, sigma_m=sigma_m)
+                                    history_len=4, future_len=4, sigma_m=sigma_m,
+                                    bev_down=bev_down)
     val_ds = FieldSequenceDataset(annotations_dir, split="val",
-                                  history_len=4, future_len=4, sigma_m=sigma_m)
+                                  history_len=4, future_len=4, sigma_m=sigma_m,
+                                  bev_down=bev_down)
     print(f"  Train: {len(train_ds)} windows, Val: {len(val_ds)} windows")
 
     train_loader = DataLoader(train_ds, batch_size=2, shuffle=True, drop_last=True,
@@ -195,7 +199,7 @@ def train_convlstm(annotations_dir, output_dir, device_str, seed, sigma_m):
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Model: {n_params:,} parameters")
 
-    criterion = CombinedTemporalLoss(lambda_vel=0.5, lambda_trace=0.1, ablation="full")
+    criterion = CombinedTemporalLoss(lambda_vel=0.5, lambda_trace=0.1, ablation="full", bev_down=bev_down)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
 
@@ -243,6 +247,8 @@ def main():
     parser.add_argument("--output_dir", type=str, default="outputs/m2_pipeline")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--sigma_m", type=float, default=0.2)
+    parser.add_argument("--bev_down", type=int, default=4,
+                        help="BEV grid downsampling (4=0.1m, 8=0.2m, 16=0.4m)")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--skip_training", action="store_true")
     args = parser.parse_args()
@@ -301,7 +307,7 @@ def main():
                 vels[j] = vm[d.person_id]
         gt_vel_val.append(vels)
 
-    gt_fields = build_fields_from_positions(gt_positions_val, gt_vel_val, args.sigma_m)
+    gt_fields = build_fields_from_positions(gt_positions_val, gt_vel_val, args.sigma_m, args.bev_down)
 
     print(f"  [L1] Fields: occ_mean={gt_fields[:, 0].mean():.6f}, "
           f"occ_max={gt_fields[:, 0].max():.4f}, "
@@ -313,7 +319,7 @@ def main():
     # L1 ConvLSTM training
     if not args.skip_training:
         print("\n  [L1] ConvLSTM training...")
-        all_results["L1_convlstm"] = train_convlstm(ann_dir, output_dir, args.device, args.seed, args.sigma_m)
+        all_results["L1_convlstm"] = train_convlstm(ann_dir, output_dir, args.device, args.seed, args.sigma_m, args.bev_down)
     else:
         all_results["L1_convlstm"] = {"skipped": True}
 
@@ -347,7 +353,7 @@ def main():
 
         print("\n  [L2] Building detector fields (GT-associated)...")
         l2_vel = compute_velocities_from_positions(l2_positions_val, dt=DT)
-        l2_fields = build_fields_from_positions(l2_positions_val, l2_vel, args.sigma_m)
+        l2_fields = build_fields_from_positions(l2_positions_val, l2_vel, args.sigma_m, args.bev_down)
         print(f"  [L2] Fields: occ_mean={l2_fields[:, 0].mean():.6f}, "
               f"occ_max={l2_fields[:, 0].max():.4f}")
 
@@ -362,7 +368,7 @@ def main():
 
         print("\n  [L3] Building detector+tracker fields...")
         l3_vel = compute_velocities_from_positions(det_positions_val, dt=DT)
-        l3_fields = build_fields_from_positions(det_positions_val, l3_vel, args.sigma_m,
+        l3_fields = build_fields_from_positions(det_positions_val, l3_vel, args.sigma_m, args.bev_down,
                                                 scores_per_frame=det_scores_val)
         print(f"  [L3] Fields: occ_mean={l3_fields[:, 0].mean():.6f}, "
               f"occ_max={l3_fields[:, 0].max():.4f}")
