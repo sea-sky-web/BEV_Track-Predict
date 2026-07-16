@@ -170,3 +170,29 @@
 - [ ] ExitPlanMode 已通过？→ 进入评审，不是进入实现
 - [ ] 用户给出实质性评审意见？→ 才可开始写代码
 - [ ] 用户只说"可以/同意"？→ 追问一个验证问题确认理解
+
+---
+
+## B7. ConvLSTM 时空场预测 vs 非学习基线 (07-16) ★ 负实验
+
+- **假设**：2 层 ConvLSTM (hidden=32, ~157K 参数) 能学到超越线性平流的非线性运动模式
+- **实验**：在 WildTrack GT 场序列上训练（313 train windows, batch=2, AdamW 1e-3, full ablation: occ+vel+trace loss）
+- **结果**：
+  - ConvLSTM best val AUPRC = **0.0301**
+  - Persistence baseline AUPRC = **0.5224**
+  - Field Advection baseline AUPRC = **0.7645**
+  - ConvLSTM 比最弱基线差 17 倍
+- **结论**：在 WildTrack（~20 人/帧, 120×360 网格, 400 帧单场景）上，**场预测范式的信号太稀疏**（occ_max=0.07）。ConvLSTM 在 313 个训练窗口上无法学到超越简单线性平流的模式。
+- **教训**：
+  1. 非学习基线必须**先于**学习模型完成评估——如果 advection 已经 0.76，学习模型必须超过这个才有意义
+  2. 场预测范式需要足够密集的 occupancy 信号；~20 人在 43200 个 cell 的网格上信号过弱
+  3. 在稀疏场景中，**个体轨迹信号 > 稠密场信号**
+- **GA Run**: 29473931980 (L1), 29389441553 (first run)
+
+## B8. AUPRC 评估阈值 Bug (07-16)
+
+- **假设**：AUPRC 应该能正确评估稀疏 occupancy 场
+- **实验**：第一次 pipeline run，所有 AUPRC = 0.0000
+- **结果**：`compute_occupancy_auprc` 使用 `gt > 0.5` 二值化 GT，但 occupancy field 值域为 [0, 0.07]，正样本数永远为 0
+- **修复**：`gt_threshold` 参数（默认 1e-3）+ 自适应 threshold sweep
+- **教训**：评估指标代码的阈值必须匹配数据的实际值域。"0.5"看起来合理但在连续 occupancy field 上完全错误

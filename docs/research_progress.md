@@ -269,9 +269,90 @@ docs/
 | 实验 | 目的 | 优先级 |
 |------|------|:------:|
 | MobileNet-V2 + concat (gradient ckpt) | 控制变量：同 backbone 下 concat vs cv2 | P1 |
-| MobileNet-V2 + geo_confidence_v1 | 验证几何先验在轻量 backbone 下的效果 | P1 |
 | 截断版 MobileNet-V2 推理 benchmark | 更新推理速度数据 | P1 |
-| Focal loss 消融 (MobileNet-V2 + cv2) | 验证 focal loss 是否进一步提升 | P2 |
-| Offset head 消融 (MobileNet-V2 + cv2) | 验证 offset 是否提升 MODP | P2 |
 | 多次训练方差统计 | 确认 MODA 0.8918 的置信区间 | P2 |
-| 更多 epoch (20/30) | 验证是否欠拟合 | P2 |
+
+---
+
+## 10. Module 2: BEV 时空场预测
+
+> 最后更新：2026-07-16
+> GA Pipeline Run: 29473931980 (L1 complete), 29389441553 (first run)
+
+### 10.1 目标
+
+在冻结的 Module 1 BEV 检测器基础上，研究：
+- 跨帧轨迹关联（tracking）
+- BEV occupancy/velocity 时空场构建
+- 短时未来预测（0.5s / 1.0s / 2.0s）
+- 检测 → 关联 → 预测的误差分解
+
+### 10.2 三级评估框架
+
+| Level | 位置来源 | 身份来源 | 回答的问题 |
+|:---:|---|---|---|
+| L1 | GT annotation | GT personID | 预测模型本身的能力上限 |
+| L2 | 冻结检测器 | GT 匈牙利匹配 | 检测误差传播多少 |
+| L3 | 冻结检测器 | Kalman tracker | 完整端到端性能 |
+
+### 10.3 Tracking 实验结果（L1, val split, frames 320-359）
+
+| Tracker | MOTA | IDF1 | ID Switches | Fragmentations | TP | FP | FN |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Nearest Neighbor | 0.9116 | 0.9577 | 3 | 6 | 622 | 21 | 34 |
+| **Kalman + Hungarian** | **0.9390** | **0.9691** | **0** | **1** | 628 | 12 | 28 |
+
+**结论**：Kalman tracker 在 GT 检测上达到零 ID switch、仅 1 次 fragmentation。
+M2-2 gate 通过：Kalman IDF1 (0.9691) > NN IDF1 (0.9577) ✅
+
+### 10.4 时空场统计
+
+| Split | Frames | occ_mean | occ_max | vel_mean (m/s) |
+|---|:---:|:---:|:---:|:---:|
+| Train | 320 | 0.000562 | 0.0722 | 0.0929 |
+| Val | 40 | 0.000372 | 0.0454 | 0.0396 |
+| Test | 40 | 0.000543 | 0.0640 | 0.0583 |
+
+**关键观察**：occupancy 极度稀疏（max 仅 0.07），因为 120×360 网格（43200 cells）上仅 ~20 人。
+
+### 10.5 非学习基线（L1, val split, AUPRC, gt_threshold=1e-3）
+
+| Baseline | Val AUPRC | 说明 |
+|---|:---:|---|
+| Persistence（未来=当前） | 0.5224 ±0.14 | 合理下界 |
+| **Field Advection（速度场平流）** | **0.7645 ±0.13** | 线性外推，非常强 |
+
+### 10.6 ConvLSTM 实验结果 ❌ 负实验
+
+| 配置 | Val AUPRC | Epochs | 说明 |
+|---|:---:|:---:|---|
+| ConvLSTM (full ablation, seed=0) | **0.0301** | 27 (early stop) | 远低于所有基线 |
+
+**与基线对比**：
+- ConvLSTM (0.03) vs Persistence (0.52) → **差 17×**
+- ConvLSTM (0.03) vs Advection (0.76) → **差 25×**
+
+**根因分析**：
+1. Occupancy 信号极度稀疏（max=0.07），网络难以从 43200 个几乎全零的 cell 中学习
+2. 训练窗口仅 313 个，数据量不足以训练 157K 参数的 ConvLSTM
+3. Loss 几乎不下降（0.54 → 0.50），说明模型容量和数据规模严重不匹配
+4. Field Advection 已经是极强基线——短时+稀疏场景下线性平流捕获了大部分运动信息
+
+**按 M2-4 gate 规则**：记录为负实验，不继续堆叠更大模型。
+
+### 10.7 M2-0 冻结检测器复核
+
+| 指标 | 训练日志 | Colab 复核 | 差异原因 |
+|---|:---:|:---:|---|
+| MODA | 0.8950 | 0.8634 | cuDNN 非确定性 |
+| Precision | 0.9301 | 0.9278 | — |
+| Recall | 0.9223 | 0.8771 | — |
+
+GA Run: 29386822805。差异来自 `cudnn.benchmark=True` 在不同 T4 实例上的算法选择。
+
+### 10.8 下一步方向
+
+1. **切换到轨迹预测路线**：WildTrack 场景稀疏，个体轨迹信号远强于稠密场信号
+2. **调整场分辨率**：降低网格分辨率（0.3-0.5m cell）可能增强 occupancy 信号
+3. **等 MultiviewX 数据集就绪后**：在更稠密的合成数据上重新验证场预测方案
+4. **完成 L2&L3 三级评估**：修复 workflow 中 checkpoint 上传时序问题

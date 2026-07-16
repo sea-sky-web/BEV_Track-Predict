@@ -1,54 +1,37 @@
 # Active Plan — 当前迭代
 
-> 最后更新：2026-07-15
+> 最后更新：2026-07-16
 
-## 当前状态 🏆
+## 当前状态
+
+### Module 1 🏆 已完成
 
 | 指标 | MVDet baseline | **Ours (best)** | 变化 |
 |---|:---:|:---:|:---:|
 | MODA | 0.8456 | **0.8950** | **+4.9pp** |
-| MODP | 0.7585 | **0.7778** | +1.9pp |
-| Precision | 0.9197 | **0.9301** | +1.0pp |
-| Recall | 0.8897 | **0.9223** | +3.3pp |
-| F1 | 0.9044 | **0.9262** | +2.2pp |
 | 参数量 | 32.7M | **5.7M** | **-82.6%** |
 | FPS (T4) | 0.62 | **0.96** | **+54.8%** |
 
-**方法**：MobileNet-V2 (truncated, 0.6M) + Geometry-Reliability Attention Fusion (geo_confidence_v1)
-**目标达成**：MODA 0.8950 > MVDet 论文 0.882 ✅
+### Module 2 进行中
 
-## 阶段：第二阶段 — 已完成核心创新，进入论文准备
+| 组件 | 状态 | 关键结果 |
+|---|---|---|
+| M2-0 冻结检测器 | ✅ 复核完成 | MODA 0.8634 (cuDNN 差异) |
+| M2-1 时序坐标层 | ✅ 代码+测试通过 | 19 tests passed |
+| M2-2 Tracking | ✅ **GT 验证通过** | Kalman MOTA=0.939, IDF1=0.969, IDSW=0 |
+| M2-3 场映射+基线 | ✅ **基线有数据** | Advection AUPRC=0.7645, Persistence=0.5224 |
+| M2-4 ConvLSTM | ❌ **负实验** | AUPRC=0.0301, 远低于基线 |
+| M2-5 端到端评估 | 🔧 L2&L3 待修复 | workflow 时序问题 |
 
-### 最佳配置
-```
-backbone: mobilenet_v2 (truncated features[0:14], gradient checkpointing)
-fusion_mode: geo_confidence_v1
-optimizer: SGD lr=0.1 momentum=0.5 wd=5e-4
-scheduler: OneCycleLR max_lr=0.1
-epochs: 10, batch=1, frames=360 (train) / 40 (test, frame_start=360)
-loss_type: mse
-Best threshold: 0.375, Best NMS radius: 5.0
-```
+## 阶段：Module 2 方向调整
 
-## 下一步
+### 关键发现
+1. **Tracking 非常好**：Kalman+Hungarian 在 GT 检测上 MOTA=0.939、零 ID switch
+2. **Field Advection 是极强基线**：AUPRC=0.7645，线性平流已捕获大部分短时运动
+3. **ConvLSTM 失败**：313 个训练窗口 + 稀疏 occupancy (occ_max=0.07) → 学习模型无法超越线性基线
 
-### 下一研究模块（计划阶段，尚未实现）
-
-第一模块检测结果冻结后，计划推进 BEV 行人世界坐标 tracking、占用/速度时空场构建与
-未来 0.5s / 1.0s / 2.0s 短时预测。详细可行性、理论依据、论文基础、实验矩阵和验收门：
-
-- [Module 2 Plan — BEV 行人时空场映射与短时预测](module2_spatiotemporal_field_prediction_plan.md)
-
-该链接目前仅为研究与实施计划，不代表 tracking 或 forecasting 已进入代码；开始实现前
-必须单独评审并更新 `model_definition.md`。
-
-### P1（论文支撑实验）
-1. MobileNet-V2 + concat (加 gradient ckpt) — 控制变量
-2. MobileNet-V2 + geo_confidence_v1 — 验证几何先验在轻量 backbone 下的效果
-3. 截断版 MobileNet-V2 推理 benchmark — 更新 FPS 数据
-4. 多次训练方差统计（3 runs） — 确认结果置信区间
-
-### P2（可选增强实验）
-5. Focal loss 消融 (MobileNet-V2 + cv2)
-6. Offset head 消融 (MobileNet-V2 + cv2)
-7. 更多 epoch (20/30) — 验证是否欠拟合
+### 待决定的方向
+1. **轨迹预测路线**：轻量 GNN (Social-STGCNN) 做个体轨迹预测，WildTrack 稀疏场景更适合
+2. **场分辨率调整**：降低网格分辨率（0.3-0.5m cell）增强 occupancy 信号密度
+3. **等 MultiviewX 数据集**：在更稠密的合成数据 (~40 人/帧) 上重新验证场预测
+4. **完成 L2&L3 三级评估**：修复 workflow checkpoint 上传时序
