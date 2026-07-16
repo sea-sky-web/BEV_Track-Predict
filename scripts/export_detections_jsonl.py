@@ -89,14 +89,12 @@ def main() -> None:
         fusion_mode=args.fusion_mode,
         proj_mats=proj_mats,
         feat_hw=feat_hw,
-        bev_hw=bev_hw,
-        n_views=len(kept_views),
+        reduced_hw=bev_hw,
+        num_views=len(kept_views),
         device=device,
         pretrained=False,
         feat_ch=args.feat_ch,
         add_coord=True,
-        calib_cache=calib_cache,
-        kept_views=kept_views,
     )
     _load_model_weights(model, Path(args.model_path), device)
     model.eval()
