@@ -102,14 +102,15 @@ def main() -> None:
     ds = create_wildtrack_dataset(
         data_root=data_root,
         views=kept_views,
-        calib_cache=calib_cache,
         max_frames=args.max_frames,
+        img_hw=(args.img_h, args.img_w),
+        feat_hw=(args.feat_h, args.feat_w),
+        bev_down=args.bev_down,
+        person_h_m=1.7,
+        unit_scale=unit_scale,
+        calib_cache=calib_cache,
         frame_start=args.frame_start,
-        img_h=args.img_h,
-        img_w=args.img_w,
-        feat_h=args.feat_h,
-        feat_w=args.feat_w,
-        augment=False,
+        augment=None,
     )
     loader = DataLoader(ds, batch_size=args.batch, shuffle=False)
 
