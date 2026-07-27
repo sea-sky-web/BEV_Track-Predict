@@ -6,6 +6,60 @@
 
 ---
 
+## 2026-07-27 — M2 主线推进：workflow 修复 + 轨迹预测 baseline + 测试补齐 + 标定参数化
+
+### 进展
+
+- P1: 修复 `colab-m2-pipeline.yml` checkpoint 上传时序问题（3 处修复：下载重试+错误检查、上传校验、restore merge 逻辑）
+- P2: 新建 `tests/test_detection_loader.py`，18 个测试覆盖 JSONL 加载/位置/分数提取/Hungarian 匹配
+- P3: 新建 `src/temporal/trajectory_predictor.py` 恒速轨迹预测 baseline（含 ADE/FDE 评估框架），新建 `tests/test_trajectory_predictor.py`（9 个测试）
+- P4: `src/calibration.py` + `scripts/calibration.py` 的 `CalibrationLoader` 参数化 `intrinsic_subdir`/`extrinsic_subdir`，统一默认 `intrinsic_zero`
+- 标定工作由其他人员独立推进，与主线研究隔离
+
+### 实验结果
+
+**P1 根因分析**：`colab-m2-pipeline.yml` 三处问题导致 L2/L3 评估始终被跳过：
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| 下载失败静默继续 | `gh run download || true` 吞掉错误 | 3 次重试 + `exit 1` |
+| 上传完整性未验证 | reassembly 后无校验 | `assert size > 1MB` |
+| 恢复逻辑失效 | `if not dest.exists()` 在 git clone 后失败 | `copytree(dirs_exist_ok=True)` merge |
+
+**测试结果**：
+
+```
+122 collected, 121 passed, 1 pre-existing failure (test_augmentation hflip, Python 3.14)
+```
+
+新增测试 27 个（18 + 9），全部通过。既有测试无回归。
+
+**model_definition.md 兼容性验证**：
+
+| 文件 | 变更类型 | 合规依据 |
+|------|---------|---------|
+| `src/temporal/trajectory_predictor.py` (新建) | M2 non-learning baseline | Section 11.1: "constant velocity" baseline |
+| `tests/test_detection_loader.py` (新建) | 测试 | 不影响模型边界 |
+| `tests/test_trajectory_predictor.py` (新建) | 测试 | 不影响模型边界 |
+| `src/calibration.py` (修改) | Hub 场景参数化 | 非 M2 修改，默认行为不变，Section 11.3 合规 |
+| `scripts/calibration.py` (修改) | 同上 | 不在 Section 11.3 保护列表 |
+| `colab-m2-pipeline.yml` (修改) | Bug 修复 | M2 基础设施修复 |
+
+### 分析
+
+1. **L2/L3 阻塞已解除**：P1 修复后，`colab-m2-pipeline.yml` 可以正确下载、上传、恢复 M1 checkpoint。L2（检测位置 + GT 关联）和 L3（检测位置 + tracker 关联）评估代码（`run_m2_pipeline.py` lines 329-377）已完整实现，唯一阻塞项是 checkpoint 到达 Colab 的时序问题，现已修复。
+2. **轨迹预测 baseline 就绪**：`trajectory_predictor.py` 实现了 `predict_constant_velocity` + `evaluate_trajectory_baseline`，与 `field_metrics.py` 中已有的 `compute_trajectory_ade_fde` 对接。评估框架完整，待 Colab 上用 WildTrack val split (frames 320-359) 产出 ADE/FDE 数值。
+3. **calibration 不一致是潜伏 bug**：`src/calibration.py` 默认 `intrinsic_zero/`，`scripts/calibration.py` 默认 `intrinsic_original/`。WildTrack 目录结构使用 `intrinsic_zero/`，因此 `scripts/` 版本在某些调用路径下会 FileNotFoundError。参数化修复后两者统一，且新场景可通过参数覆盖。
+4. **detection_loader 是 L2/L3 关键路径**：此模块的 4 个函数（load、positions、scores、match）在 `run_m2_pipeline.py` 的 L2/L3 分支被直接调用，之前无测试覆盖。18 个测试验证了边界情况（空输入、缺失帧、多对多匹配），降低首次 L2/L3 运行时的 bug 风险。
+
+### 待解决
+
+- [ ] 提交代码并触发 `colab-m2-pipeline.yml` with `train_run_id=29345199882` → 首次 L2/L3 结果
+- [ ] Colab 上运行 `evaluate_trajectory_baseline(trajectories, split="val")` → ADE/FDE baseline 数值
+- [ ] 根据 ADE/FDE 数值做方向决策：MLP / Social-STGCNN / 深耕场预测
+
+---
+
 ## 2026-07-15 — 模块二研究计划入库（仅计划，未实现）
 
 ### 文档变更
@@ -288,3 +342,4 @@ MVDet 论文报告 0.882（MATLAB eval）；MVDet 代码自带的 Python eval �
 | 07-13 | 统一对比实验，fusion_mode 参数化 | 0.8456 | 32.7M |
 | 07-14 | MobileNet-V2 backbone + gradient checkpointing | — | 5.7M |
 | **07-14** | **🏆 MODA 0.8950 — 超越 MVDet (0.882)，参数 -82.6%，速度 +55%** | **0.8950** | **5.7M** |
+| 07-27 | M2 主线推进：workflow 修复 + 轨迹预测 baseline + 测试补齐 + 标定参数化 | — | — |

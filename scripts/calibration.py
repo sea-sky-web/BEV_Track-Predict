@@ -207,18 +207,13 @@ class CalibrationLoader:
         cache: 标定数据缓存
     """
     
-    def __init__(self, calib_root: Path, cam_names: list):
-        """
-        初始化标定加载器
-        
-        Args:
-            calib_root: 标定文件根目录，应包含：
-                - intrinsic_original/intr_*.xml
-                - extrinsic/extr_*.xml
-            cam_names: 相机名称列表
-        """
+    def __init__(self, calib_root: Path, cam_names: list,
+                 intrinsic_subdir: str = "intrinsic_zero",
+                 extrinsic_subdir: str = "extrinsic"):
         self.calib_root = calib_root
         self.cam_names = cam_names
+        self.intrinsic_subdir = intrinsic_subdir
+        self.extrinsic_subdir = extrinsic_subdir
         self.cache: Dict[int, Dict[str, Any]] = {}
     
     def load(self, view_id: int) -> Dict[str, Any]:
@@ -244,8 +239,8 @@ class CalibrationLoader:
             return self.cache[view_id]
         
         cam_name = self.cam_names[view_id]
-        intr_path = self.calib_root / "intrinsic_original" / f"intr_{cam_name}.xml"
-        extr_path = self.calib_root / "extrinsic" / f"extr_{cam_name}.xml"
+        intr_path = self.calib_root / self.intrinsic_subdir / f"intr_{cam_name}.xml"
+        extr_path = self.calib_root / self.extrinsic_subdir / f"extr_{cam_name}.xml"
         
         if not intr_path.exists():
             raise FileNotFoundError(f"内参文件不存在: {intr_path}")

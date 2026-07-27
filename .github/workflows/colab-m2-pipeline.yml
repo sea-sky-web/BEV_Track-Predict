@@ -86,13 +86,29 @@ jobs:
         if: inputs.train_run_id != ''
         run: |
           echo "Downloading M1 checkpoint from run ${{ inputs.train_run_id }}..."
-          gh run download ${{ inputs.train_run_id }} -D /tmp/m1_ckpt --repo ${{ github.repository }} 2>&1 || true
+          DOWNLOAD_OK=false
+          for attempt in 1 2 3; do
+            if gh run download ${{ inputs.train_run_id }} -D /tmp/m1_ckpt --repo ${{ github.repository }} 2>&1; then
+              DOWNLOAD_OK=true
+              break
+            fi
+            echo "Attempt $attempt failed, retrying in 15s..."
+            rm -rf /tmp/m1_ckpt
+            sleep 15
+          done
+          if [ "$DOWNLOAD_OK" != "true" ]; then
+            echo "::error::Failed to download artifacts from run ${{ inputs.train_run_id }} after 3 attempts"
+            exit 1
+          fi
           CKPT=$(find /tmp/m1_ckpt -name 'model_final.pth' -type f 2>/dev/null | head -1)
           if [ -n "$CKPT" ]; then
             cp "$CKPT" ./model_final.pth
             echo "[OK] M1 checkpoint downloaded ($(du -h ./model_final.pth | cut -f1))"
           else
-            echo "[WARN] model_final.pth not found, Level 2&3 will be skipped"
+            echo "::error::model_final.pth not found in run ${{ inputs.train_run_id }} artifacts"
+            echo "Available files:"
+            find /tmp/m1_ckpt -type f 2>/dev/null || echo "(none)"
+            exit 1
           fi
         env:
           GH_TOKEN: ${{ github.token }}
@@ -120,16 +136,18 @@ jobs:
             done
           done
 
-          echo "import glob, shutil
+          echo "import glob, shutil, os
           parts = sorted(glob.glob('$REMOTE/_chunks/chunk_*'))
           with open('$REMOTE/model_final.pth', 'wb') as out:
               for p in parts:
                   with open(p, 'rb') as f:
                       shutil.copyfileobj(f, out)
           shutil.rmtree('$REMOTE/_chunks')
-          import os; print(f'[OK] Reassembled {len(parts)} chunks, {os.path.getsize(\"$REMOTE/model_final.pth\")/1e6:.1f} MB')
+          size = os.path.getsize('$REMOTE/model_final.pth')
+          print(f'[OK] Reassembled {len(parts)} chunks, {size/1e6:.1f} MB')
+          assert size > 1_000_000, f'Checkpoint too small ({size} bytes), upload likely failed'
           " | colab exec -s bev-m2
-          echo "[OK] M1 checkpoint uploaded"
+          echo "[OK] M1 checkpoint uploaded and verified"
 
       - name: Run M2 pipeline
         timeout-minutes: 150
@@ -176,7 +194,16 @@ jobs:
               run(["git", "clone", REPO_URL, str(REPO_DIR)])
               for name, tmp in saved.items():
                   dest = REPO_DIR / name
-                  if not dest.exists():
+                  if dest.exists():
+                      for item in tmp.iterdir():
+                          target = dest / item.name
+                          if item.is_dir():
+                              shutil.copytree(str(item), str(target), dirs_exist_ok=True)
+                          else:
+                              target.parent.mkdir(parents=True, exist_ok=True)
+                              shutil.copy2(str(item), str(target))
+                      shutil.rmtree(str(tmp))
+                  else:
                       shutil.move(str(tmp), str(dest))
 
           # Download dataset
@@ -208,7 +235,8 @@ jobs:
           jsonl_path = REPO_DIR / "outputs" / "frozen_detector" / "detections.jsonl"
           det_flag = []
           if ckpt_path.exists():
-              print(f"\n[M1] Exporting detections from {ckpt_path}...")
+              print(f"\n[M1] Checkpoint found: {ckpt_path} ({ckpt_path.stat().st_size / 1e6:.1f} MB)")
+              print(f"[M1] Exporting detections from {ckpt_path}...")
               export_cmd = [
                   sys.executable, str(REPO_DIR / "scripts" / "export_detections_jsonl.py"),
                   "--data_root", str(data_root),

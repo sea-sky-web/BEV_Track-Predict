@@ -232,6 +232,7 @@ gh workflow run benchmark.yml --repo sea-sky-web/BEV_Track-Predict -f gpu=T4
 | 07-13 | 统一对比实验：concat vs attention fusion | 0.8456 | 32.7M |
 | 07-14 | MobileNet-V2 backbone + gradient checkpointing | — | 5.7M |
 | **07-14** | **🏆 MODA 0.8950 — 超越 MVDet (0.882)，参数 -82.6%，速度 +55%** | **0.8950** | **5.7M** |
+| 07-27 | M2 主线推进：workflow 修复 + 轨迹预测 baseline + 测试补齐 + 标定参数化 | — | — |
 
 ---
 
@@ -243,17 +244,42 @@ src/
                        # Fusion: concat / confidence_v1 / confidence_v2 / geo_confidence_v1
                        # Head: MVDetMapClassifier / BEVHeadDilated
   geometry.py           # 投影矩阵, 透视变换, 几何元数据 (valid_mask, border_margin, coverage)
+  calibration.py        # CalibrationLoader (参数化 intrinsic_subdir/extrinsic_subdir)
   train_main.py         # 训练入口
   evaluate_main.py      # 评估入口 (阈值/NMS 网格扫描)
   trainer.py            # MVDetTrainer (MSE/focal loss, offset head)
 
+  temporal/
+    trajectory_predictor.py  # 恒速轨迹预测 baseline + ADE/FDE 评估 (2026-07-27 新增)
+    detection_loader.py      # 检测器 JSONL 加载 + GT Hungarian 匹配
+    convlstm.py              # SpatioTemporalPredictor (ConvLSTM encoder-decoder)
+    temporal_loss.py         # Occupancy + Velocity + Trace consistency loss
+    temporal_dataset.py      # FieldSequenceDataset (时序场窗口)
+    temporal_trainer.py      # TemporalTrainer (early stopping, AUPRC)
+    train_temporal_main.py   # M2 训练入口
+    tracker_kalman.py        # Kalman + Hungarian tracker
+    tracker_nn.py            # Nearest-neighbor tracker
+    field_builder.py         # Occupancy/velocity 场构建
+    baselines.py             # Persistence / Advection 非学习基线
+    field_metrics.py         # AUPRC, IoU, EPE, ADE/FDE
+    annotation_reader.py     # WildTrack annotation → Detection/Trajectory
+    coordinates.py           # positionID ↔ grid ↔ world 坐标转换
+    time_utils.py            # 帧率、时间戳、split 范围
+
 scripts/
   colab_train.py        # Colab 端到端训练+评估 (支持 --backbone --fusion_mode --loss_type)
   benchmark_inference.py # GPU 推理速度 benchmark (多 backbone × 多 fusion)
+  run_m2_pipeline.py    # M2 三级评估 pipeline (L1/L2/L3)
+  calibration.py        # 标定工具 (CalibrationLoader, 参数化)
 
 .github/workflows/
   colab-train.yml       # 训练 workflow (backbone/fusion_mode/loss_type/offset_weight)
+  colab-m2-pipeline.yml # M2 pipeline workflow (含 checkpoint 上传修复)
   benchmark.yml         # 推理 benchmark workflow
+
+tests/
+  test_detection_loader.py    # JSONL 加载 + Hungarian 匹配 (18 tests, 2026-07-27 新增)
+  test_trajectory_predictor.py # 恒速轨迹预测 (9 tests, 2026-07-27 新增)
 
 docs/
   research_progress.md  # 本文档 — 论文数据和研究进展
