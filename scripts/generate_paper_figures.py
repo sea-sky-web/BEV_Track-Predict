@@ -386,7 +386,7 @@ def fig_bev_overlay():
 
 
 def fig_tracking_vis():
-    """Fig 9: Simulated BEV tracking visualization."""
+    """Fig 9: Simulated BEV tracking visualization with realistic curved trajectories."""
     rng = np.random.default_rng(42)
     fig, ax = plt.subplots(figsize=(COL_W, 3.0))
     ax.set_xlim(-3, 9)
@@ -397,21 +397,41 @@ def fig_tracking_vis():
     ax.grid(True, alpha=0.15, linewidth=0.3)
 
     n = 15
-    pos = rng.uniform(low=[-2, -8], high=[8, 2], size=(n, 2))
-    vel = rng.uniform(-0.7, 0.7, size=(n, 2))
     cmap = plt.cm.tab10
+    n_steps = 12
 
     for i in range(n):
-        trail = np.array([pos[i] - vel[i]*t*0.5 for t in range(6, 0, -1)])
-        alpha_vals = np.linspace(0.15, 0.6, 6)
-        for j in range(5):
-            ax.plot(trail[j:j+2, 0], trail[j:j+2, 1], "-", color=cmap(i%10),
-                    alpha=alpha_vals[j], linewidth=1.0)
-        ax.plot(pos[i, 0], pos[i, 1], "o", color=cmap(i%10), markersize=5,
-                markeredgecolor="black", markeredgewidth=0.3)
-        dx, dy = vel[i]*0.5, vel[i]*0.5
-        ax.arrow(pos[i, 0], pos[i, 1], vel[i, 0]*0.4, vel[i, 1]*0.4,
-                 head_width=0.12, head_length=0.06, fc=cmap(i%10), ec=cmap(i%10), linewidth=0.4)
+        start = rng.uniform(low=[-2, -8], high=[8, 2], size=2)
+        vel = rng.uniform(-0.5, 0.5, size=2)
+        # Generate smooth curved trajectory via correlated random walk
+        trajectory = np.zeros((n_steps, 2))
+        trajectory[0] = start
+        ang = np.arctan2(vel[1], vel[0])
+        speed = np.linalg.norm(vel) + 0.3
+
+        for t in range(1, n_steps):
+            ang += rng.normal(0, 0.25)  # gradual direction change
+            speed_t = speed * (1 + rng.normal(0, 0.1))  # speed variation
+            trajectory[t, 0] = trajectory[t-1, 0] + speed_t * np.cos(ang) * 0.5
+            trajectory[t, 1] = trajectory[t-1, 1] + speed_t * np.sin(ang) * 0.5
+
+        # Draw fading trail
+        for j in range(n_steps - 1):
+            alpha = 0.15 + 0.6 * (j / (n_steps - 1))
+            lw = 0.4 + 0.8 * (j / (n_steps - 1))
+            ax.plot(trajectory[j:j+2, 0], trajectory[j:j+2, 1], "-",
+                    color=cmap(i % 10), alpha=alpha, linewidth=lw)
+
+        # Current position (last point)
+        ax.plot(trajectory[-1, 0], trajectory[-1, 1], "o", color=cmap(i % 10),
+                markersize=5, markeredgecolor="black", markeredgewidth=0.3)
+
+        # Velocity arrow at current position
+        dx = trajectory[-1, 0] - trajectory[-2, 0]
+        dy = trajectory[-1, 1] - trajectory[-2, 1]
+        ax.arrow(trajectory[-1, 0], trajectory[-1, 1], dx*0.8, dy*0.8,
+                 head_width=0.1, head_length=0.05, fc=cmap(i % 10),
+                 ec=cmap(i % 10), linewidth=0.4)
 
     ax.text(0.02, 0.98, "Kalman+Hungarian Tracker\n15 active tracks, IDSW=0",
             transform=ax.transAxes, fontsize=6.5, va="top",
