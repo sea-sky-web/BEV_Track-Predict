@@ -6,6 +6,56 @@
 
 ---
 
+## 2026-07-30 — L2/L3 结果确认 + 轨迹评估集成 pipeline
+
+### 进展
+
+- 确认 run 30265419077（2026-07-27）已成功完成 L2 & L3 三级评估
+- 将 `evaluate_trajectory_baseline()` 集成到 `scripts/run_m2_pipeline.py`，下次 run 自动产出 ADE/FDE
+- 更新 `docs/active_plan.md` 三级评估对比表
+
+### 实验结果
+
+**三级端到端评估（Run 30265419077, T4 GPU）**
+
+| Level | 位置来源 | 关联方式 | Tracker | MOTA | IDF1 | IDSW | TP | FP | FN | Advection AUPRC | Persistence AUPRC |
+|:---:|---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| L1 | GT | GT | Kalman | 0.9390 | 0.9691 | 0 | 628 | 12 | 28 | 0.7645 ±0.13 | 0.5224 ±0.14 |
+| L2 | Detector | GT | Kalman | 0.8841 | 0.9410 | 2 | 590 | 8 | 66 | 0.6697 ±0.14 | 0.5506 ±0.15 |
+| L3 | Detector | Tracker | Kalman | 0.7866 | 0.9063 | 18 | 590 | 56 | 66 | 0.6550 ±0.15 | 0.5389 ±0.16 |
+
+NN tracker 结果（供参考）：
+
+| Level | MOTA | IDF1 | IDSW |
+|:---:|:---:|:---:|:---:|
+| L1 | 0.9116 | 0.9577 | 3 |
+| L2 | 0.8049 | 0.9023 | 5 |
+| L3 | 0.7134 | 0.8768 | 27 |
+
+### 分析
+
+1. **L1 Kalman 确认强基线**：MOTA=0.939, IDSW=0 与之前 M2-2 验证一致
+2. **检测器定位误差（L1→L2）**：FN 28→66（+135%），说明检测器 miss 率约 10%（66/656）。FP 仅 12→8，检测器 precision 高。IDSW 0→2 几乎无影响
+3. **Tracker 关联误差（L2→L3）**：IDSW 2→18，FP 8→56（+600%）。TP 不变（590），FN 不变（66），说明 tracker 没有丢额外目标，而是产生了大量虚假 track（FP surge）。原因可能是 Kalman 预测位置 + 检测器定位偏差 → 匹配失败 → 新 track 开启
+4. **场预测鲁棒性好**：Advection AUPRC L1(0.7645)→L3(0.6550) 仅下降 14%，说明线性平流对个体 ID switch 不敏感（因为它只看位置+速度，不依赖身份）
+5. **Persistence 基线在 L2 反而略高**（0.5506 vs L1 的 0.5224）：可能因为检测器 miss 的目标恰好是运动中的人，去掉后剩余目标更静止
+
+### 代码变更
+
+| 文件 | 说明 |
+|------|------|
+| `scripts/run_m2_pipeline.py` | 集成 `evaluate_trajectory_baseline()` 到 pipeline 末尾 |
+| `docs/active_plan.md` | 三级对比表 + 洞察更新 |
+| `docs/daily-log.md` | 07-30 日志 |
+
+### 待解决
+
+- [ ] 提交并触发 `colab-m2-pipeline.yml` with `train_run_id=29345199882` → 产出 ADE/FDE
+- [ ] 根据 ADE/FDE 做方向决策
+- [ ] 考虑改进 L3 tracker：降低 FP（dist_gate 调参 or 更激进的 min_hits）
+
+---
+
 ## 2026-07-27 — M2 主线推进：workflow 修复 + 轨迹预测 baseline + 测试补齐 + 标定参数化
 
 ### 进展

@@ -379,6 +379,19 @@ def main():
         print("\n[INFO] No --detections_jsonl provided. Skipping Level 2 & 3.")
         print("[INFO] To enable: run export_detections_jsonl.py first, then pass the JSONL path.")
 
+    # ── Trajectory Prediction Baseline ──
+    banner("TRAJECTORY PREDICTION (constant velocity)")
+    from temporal.trajectory_predictor import evaluate_trajectory_baseline
+
+    traj_results = evaluate_trajectory_baseline(
+        trajectories_val, split="val", n_history=4, n_future=4, dt=DT
+    )
+    all_results["trajectory_baseline"] = traj_results
+    print(f"  ADE = {traj_results['ade_mean']:.4f} ± {traj_results['ade_std']:.4f} m")
+    print(f"  FDE = {traj_results['fde_mean']:.4f} ± {traj_results['fde_std']:.4f} m")
+    print(f"  Horizon = {traj_results['horizon_s']:.2f} s")
+    print(f"  N_trajectories = {traj_results['n_trajectories']}, N_windows = {traj_results['n_windows']}")
+
     # ── Summary ──
     banner("RESULTS SUMMARY")
     results_path = output_dir / "m2_pipeline_results.json"
@@ -404,6 +417,11 @@ def main():
 
     if "L1_convlstm" in all_results and "best_auprc" in all_results.get("L1_convlstm", {}):
         print(f"\n  ConvLSTM (L1, best val AUPRC): {all_results['L1_convlstm']['best_auprc']:.4f}")
+
+    if "trajectory_baseline" in all_results:
+        tb = all_results["trajectory_baseline"]
+        print(f"\n  Trajectory baseline (constant velocity, {tb['horizon_s']:.1f}s):")
+        print(f"    ADE={tb['ade_mean']:.4f}m  FDE={tb['fde_mean']:.4f}m  ({tb['n_trajectories']} predictions)")
 
     print("\n[DONE] Pipeline complete", flush=True)
 
