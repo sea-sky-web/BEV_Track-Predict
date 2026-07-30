@@ -387,6 +387,30 @@ def main():
             ],
         }
 
+        # L3 Tracker parameter grid search
+        print("\n  [L3] Tracker parameter grid search...")
+        from temporal.tracking_metrics import evaluate_tracking as _eval_track
+        grid_results = []
+        for min_h in [2, 3, 4]:
+            for max_a in [1, 2, 3]:
+                for dg in [0.5, 0.75, 1.0]:
+                    trk = KalmanHungarianTracker(dist_gate=dg, max_age=max_a, min_hits=min_h)
+                    pf = _run_tracker_on_frames(trk, det_positions_val, val_start)
+                    m = _eval_track(gt_frames_data, pf, dist_thr=0.5)
+                    grid_results.append({
+                        "min_hits": min_h, "max_age": max_a, "dist_gate": dg,
+                        "mota": m.mota, "idf1": m.idf1,
+                        "idsw": m.id_switches, "fp": m.fp, "fn": m.fn,
+                    })
+
+        grid_results.sort(key=lambda r: -r["mota"])
+        all_results["L3_tracker_grid"] = grid_results[:10]
+        print(f"  [L3/grid] Top 5 configurations by MOTA:")
+        for i, r in enumerate(grid_results[:5]):
+            print(f"    #{i+1}: min_hits={r['min_hits']} max_age={r['max_age']} "
+                  f"dist_gate={r['dist_gate']} → MOTA={r['mota']:.4f} "
+                  f"IDF1={r['idf1']:.4f} IDSW={r['idsw']} FP={r['fp']} FN={r['fn']}")
+
         print("\n  [L3] Building detector+tracker fields...")
         l3_vel = compute_velocities_from_positions(det_positions_val, dt=DT)
         l3_fields = build_fields_from_positions(det_positions_val, l3_vel, args.sigma_m, args.bev_down,

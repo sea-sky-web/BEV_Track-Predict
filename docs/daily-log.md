@@ -6,39 +6,64 @@
 
 ---
 
-## 2026-07-30 — L2/L3 结果确认 + 轨迹评估集成 pipeline
+## 2026-07-30 — L2/L3 结果确认 + 轨迹评估集成 + MLP 负实验 + IDSW 诊断
 
 ### 进展
 
 - 确认 run 30265419077（2026-07-27）已成功完成 L2 & L3 三级评估
-- 将 `evaluate_trajectory_baseline()` 集成到 `scripts/run_m2_pipeline.py`，下次 run 自动产出 ADE/FDE
-- 更新 `docs/active_plan.md` 三级评估对比表
+- 将 `evaluate_trajectory_baseline()` 集成到 `scripts/run_m2_pipeline.py`
+- 实现 MLP 轨迹预测器（numpy-only, 5-seed），集成到 pipeline
+- 实现 tracker 诊断模块（逐事件 IDSW/FP 分析）
+- Pipeline run 30510404162: 产出首次 ADE/FDE
+- **Pipeline run 30511632914: MLP 负实验确认 + IDSW 根因定位**
+- 落盘方向决策分析文档
 
 ### 实验结果
 
-**三级端到端评估（Run 30265419077, T4 GPU）**
+**Constant-Velocity Baseline（Run 30510404162）**
 
-| Level | 位置来源 | 关联方式 | Tracker | MOTA | IDF1 | IDSW | TP | FP | FN | Advection AUPRC | Persistence AUPRC |
-|:---:|---|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| L1 | GT | GT | Kalman | 0.9390 | 0.9691 | 0 | 628 | 12 | 28 | 0.7645 ±0.13 | 0.5224 ±0.14 |
-| L2 | Detector | GT | Kalman | 0.8841 | 0.9410 | 2 | 590 | 8 | 66 | 0.6697 ±0.14 | 0.5506 ±0.15 |
-| L3 | Detector | Tracker | Kalman | 0.7866 | 0.9063 | 18 | 590 | 56 | 66 | 0.6550 ±0.15 | 0.5389 ±0.16 |
+| 指标 | 数值 |
+|------|:----:|
+| ADE | 0.1555 ± 0.0360 m |
+| FDE | 0.2693 ± 0.0756 m |
+| Horizon | 2.0 s |
+| N_predictions | 498 |
 
-NN tracker 结果（供参考）：
+**MLP Predictor ❌ 负实验（Run 30511632914）**
 
-| Level | MOTA | IDF1 | IDSW |
-|:---:|:---:|:---:|:---:|
-| L1 | 0.9116 | 0.9577 | 3 |
-| L2 | 0.8049 | 0.9023 | 5 |
-| L3 | 0.7134 | 0.8768 | 27 |
+| Seed | Val ADE | Epochs |
+|:---:|:---:|:---:|
+| 0 | 0.3417m | 300 |
+| 1 | 0.3464m | 300 |
+| 2 | 0.3350m | 300 |
+| 3 | 0.3491m | 300 |
+| 4 | 0.3067m | 300 |
+| **Mean** | **0.3358 ± 0.015m** | — |
+
+**结论：MLP (0.336m) 比恒速 baseline (0.155m) 差 2.2×。**
+
+根因：训练数据 5991 窗口中的运动模式几乎完全是恒速直线行走，MLP 没有额外模式可学。这与 ConvLSTM 在场预测上的失败一致——WildTrack 行人运动太简单，不足以让学习模型超越物理启发式。
+
+**Tracker IDSW 诊断（Run 30511632914）**
+
+| 诊断项 | 数值 | 解读 |
+|--------|:----:|------|
+| Total IDSW | 18 | — |
+| Total FP | 56 | — |
+| FP near GT (<1.0m) | 51/56 (91%) | 几乎所有 FP 是紧邻真实行人的短命 track |
+| FP far (≥1.0m) | 5/56 | 少量真正虚警 |
+| Avg IDSW match dist | 0.208m | 切换发生在 gate 内，不是 gate 太大的问题 |
+| Person 84 IDSW | 5 次 | 最严重个体 |
+| Track 4 FP | 9 帧 | 最频繁虚假 track |
+
+**IDSW 按 GT Person 分布**：{84: 5, 83: 3, 77: 2, 82: 2, 1108: 2, 592: 1, 115: 1, 89: 1, 92: 1}
 
 ### 分析
 
-1. **L1 Kalman 确认强基线**：MOTA=0.939, IDSW=0 与之前 M2-2 验证一致
-2. **检测器定位误差（L1→L2）**：FN 28→66（+135%），说明检测器 miss 率约 10%（66/656）。FP 仅 12→8，检测器 precision 高。IDSW 0→2 几乎无影响
-3. **Tracker 关联误差（L2→L3）**：IDSW 2→18，FP 8→56（+600%）。TP 不变（590），FN 不变（66），说明 tracker 没有丢额外目标，而是产生了大量虚假 track（FP surge）。原因可能是 Kalman 预测位置 + 检测器定位偏差 → 匹配失败 → 新 track 开启
-4. **场预测鲁棒性好**：Advection AUPRC L1(0.7645)→L3(0.6550) 仅下降 14%，说明线性平流对个体 ID switch 不敏感（因为它只看位置+速度，不依赖身份）
-5. **Persistence 基线在 L2 反而略高**（0.5506 vs L1 的 0.5224）：可能因为检测器 miss 的目标恰好是运动中的人，去掉后剩余目标更静止
+1. **MLP 负实验完全预期**：ADE=0.155m 意味着 2s 内行人仅偏离恒速 15cm，没有可学习的非线性模式
+2. **FP 根因是 min_hits 太低**：min_hits=2 允许短命 track 只被确认 2 次就输出，在密集区域产生虚假 track
+3. **IDSW 根因是近距离行人互相干扰**：Person 84 可能在人群交叉区域，导致 Kalman 预测位置与错误检测匹配
+4. **修复方向明确**：增加 min_hits 到 3-4 可消除大部分 FP；dist_gate 调整作用有限（avg match dist 仅 0.208m）
 
 ### 代码变更
 

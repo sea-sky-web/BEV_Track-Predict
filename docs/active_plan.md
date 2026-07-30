@@ -56,7 +56,8 @@
 
 ### 下一步（按优先级）
 1. **~~触发 L2&L3 评估~~** ✅ 完成（run 30265419077）
-2. **产出 ADE/FDE baseline**：触发新 pipeline run → constant-velocity ADE/FDE 数值
-3. **方向决策**：根据 ADE/FDE 数值选择 MLP / Social-STGCNN / 深耕场预测
-4. **标定（并行）**：由其他人员独立推进枢纽相机外参现场标定
-5. **标定后**：config/dataset 参数化重构 → Hub 场景首次训练
+2. **~~产出 ADE/FDE baseline~~** ✅ ADE=0.1555m, FDE=0.2693m（run 30510404162）
+3. **~~MLP 轨迹预测~~** ❌ 负实验（ADE=0.336m, 比 baseline 差 2.2×）
+4. **改进 L3 Tracker**：min_hits 参数网格搜索 → 降低 FP（51/56 FP 是短命 track）
+5. **标定（并行）**：由其他人员独立推进枢纽相机外参现场标定
+6. **标定后**：config/dataset 参数化重构 → Hub 场景首次训练
