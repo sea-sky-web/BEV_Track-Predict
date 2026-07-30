@@ -366,6 +366,27 @@ def main():
         print("\n  [L3] Tracking evaluation (det positions + tracker IDs)...")
         all_results["L3_tracking"] = eval_tracking(gt_frames_data, det_positions_val, val_start, "L3")
 
+        # L3 Diagnostics: identify IDSW and FP root causes
+        from temporal.tracker_diagnostics import diagnose_tracker
+        from temporal.tracker_kalman import KalmanHungarianTracker
+
+        l3_tracker = KalmanHungarianTracker(dist_gate=1.0, max_age=2, min_hits=2)
+        l3_pred_frames = _run_tracker_on_frames(l3_tracker, det_positions_val, val_start)
+        diag = diagnose_tracker(gt_frames_data, l3_pred_frames, dist_thr=0.5, frame_offset=val_start)
+        print(f"\n  [L3/diag] {diag.summary}")
+        all_results["L3_diagnostics"] = {
+            "total_idsw": diag.total_idsw,
+            "total_fp": diag.total_fp,
+            "idsw_by_gt_id": diag.idsw_by_gt_id,
+            "fp_by_track_id": {str(k): v for k, v in list(diag.fp_by_track_id.items())[:10]},
+            "idsw_events": [
+                {"frame": e.frame_index, "gt_id": e.gt_id,
+                 "old_track": e.old_track_id, "new_track": e.new_track_id,
+                 "dist_to_new": round(e.distance_to_new, 4)}
+                for e in diag.id_switch_events
+            ],
+        }
+
         print("\n  [L3] Building detector+tracker fields...")
         l3_vel = compute_velocities_from_positions(det_positions_val, dt=DT)
         l3_fields = build_fields_from_positions(det_positions_val, l3_vel, args.sigma_m, args.bev_down,
@@ -391,6 +412,51 @@ def main():
     print(f"  FDE = {traj_results['fde_mean']:.4f} ± {traj_results['fde_std']:.4f} m")
     print(f"  Horizon = {traj_results['horizon_s']:.2f} s")
     print(f"  N_trajectories = {traj_results['n_trajectories']}, N_windows = {traj_results['n_windows']}")
+
+    # ── MLP Trajectory Predictor ──
+    banner("TRAJECTORY PREDICTION (MLP)")
+    from temporal.mlp_predictor import (
+        extract_trajectory_windows, train_mlp_predictor,
+        evaluate_mlp_predictor, MLPTrajectoryConfig,
+    )
+    from temporal.annotation_reader import load_all_annotations, build_trajectories as _build_traj
+
+    train_start, train_end = get_split_range("train")
+    train_frames = load_all_annotations(ann_dir, frame_start=train_start, max_frames=train_end - train_start)
+    all_trajectories = _build_traj(train_frames + frames_val)
+
+    train_hist, train_fut = extract_trajectory_windows(all_trajectories, "train", 4, 4)
+    val_hist, val_fut = extract_trajectory_windows(all_trajectories, "val", 4, 4)
+    print(f"  Train windows: {train_hist.shape[0]}, Val windows: {val_hist.shape[0]}")
+
+    if train_hist.shape[0] > 0 and val_hist.shape[0] > 0:
+        mlp_results_all = []
+        for seed in range(5):
+            cfg = MLPTrajectoryConfig(
+                n_history=4, n_future=4, hidden_dim=64,
+                learning_rate=1e-3, weight_decay=1e-4,
+                max_epochs=300, patience=30, seed=seed,
+            )
+            res = train_mlp_predictor(train_hist, train_fut, val_hist, val_fut, cfg)
+            mlp_results_all.append(res)
+            print(f"  [seed={seed}] val ADE={res['best_val_ade']:.4f}m "
+                  f"(epochs={res['epochs_trained']})")
+
+        ades = [r["best_val_ade"] for r in mlp_results_all]
+        all_results["trajectory_mlp"] = {
+            "val_ade_mean": float(np.mean(ades)),
+            "val_ade_std": float(np.std(ades)),
+            "val_ade_seeds": ades,
+            "n_train": int(train_hist.shape[0]),
+            "n_val": int(val_hist.shape[0]),
+            "beats_baseline": float(np.mean(ades)) < traj_results["ade_mean"],
+        }
+        print(f"\n  MLP mean ADE = {np.mean(ades):.4f} ± {np.std(ades):.4f} m")
+        print(f"  Const-vel ADE = {traj_results['ade_mean']:.4f} m")
+        print(f"  MLP {'BEATS' if np.mean(ades) < traj_results['ade_mean'] else 'DOES NOT BEAT'} baseline")
+    else:
+        print("  [SKIP] Insufficient trajectory windows for MLP training")
+        all_results["trajectory_mlp"] = {"skipped": True}
 
     # ── Summary ──
     banner("RESULTS SUMMARY")
@@ -422,6 +488,12 @@ def main():
         tb = all_results["trajectory_baseline"]
         print(f"\n  Trajectory baseline (constant velocity, {tb['horizon_s']:.1f}s):")
         print(f"    ADE={tb['ade_mean']:.4f}m  FDE={tb['fde_mean']:.4f}m  ({tb['n_trajectories']} predictions)")
+
+    if "trajectory_mlp" in all_results and "val_ade_mean" in all_results.get("trajectory_mlp", {}):
+        tm = all_results["trajectory_mlp"]
+        print(f"  Trajectory MLP (5 seeds):")
+        print(f"    ADE={tm['val_ade_mean']:.4f} ± {tm['val_ade_std']:.4f}m  "
+              f"({'BEATS' if tm['beats_baseline'] else 'DOES NOT BEAT'} baseline)")
 
     print("\n[DONE] Pipeline complete", flush=True)
 

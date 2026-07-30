@@ -233,6 +233,7 @@ gh workflow run benchmark.yml --repo sea-sky-web/BEV_Track-Predict -f gpu=T4
 | 07-14 | MobileNet-V2 backbone + gradient checkpointing | — | 5.7M |
 | **07-14** | **🏆 MODA 0.8950 — 超越 MVDet (0.882)，参数 -82.6%，速度 +55%** | **0.8950** | **5.7M** |
 | 07-27 | M2 主线推进：workflow 修复 + 轨迹预测 baseline + 测试补齐 + 标定参数化 | — | — |
+| **07-30** | **M2 三级评估完成 + ADE/FDE baseline: ADE=0.155m, FDE=0.269m** | — | — |
 
 ---
 
@@ -392,7 +393,35 @@ GA Run: 29386822805。差异来自 `cudnn.benchmark=True` 在不同 T4 实例上
 
 ### 10.8 下一步方向
 
-1. **切换到轨迹预测路线**：WildTrack 场景稀疏，个体轨迹信号远强于稠密场信号
-2. **调整场分辨率**：降低网格分辨率（0.3-0.5m cell）可能增强 occupancy 信号
-3. **等 MultiviewX 数据集就绪后**：在更稠密的合成数据上重新验证场预测方案
-4. **完成 L2&L3 三级评估**：修复 workflow 中 checkpoint 上传时序问题
+1. ~~**切换到轨迹预测路线**~~：Constant-velocity ADE=0.155m 说明学习模型提升空间有限
+2. ~~**完成 L2&L3 三级评估**~~：✅ 已完成（run 30265419077）
+3. **改进 L3 tracker**：FP surge (8→56, IDSW=18) 是主要端到端退化来源
+4. **轻量 MLP 轨迹预测**：2-layer MLP 作为最小学习改进尝试
+5. **等 Hub 场景标定后**：高密度数据重新验证场预测方案
+
+### 10.9 轨迹预测 Baseline 结果（Run 30510404162, 2026-07-30）
+
+| 指标 | 数值 | 说明 |
+|------|:----:|------|
+| **ADE** | **0.1555 ± 0.0360 m** | 全轨迹平均位移误差 |
+| **FDE** | **0.2693 ± 0.0756 m** | 最终帧位移误差 |
+| Horizon | 2.0 s | 4 帧 × 0.5s |
+| N_trajectories | 498 | val split 全部可预测轨迹 |
+| N_windows | 33 | 滑动窗口数 |
+
+**结论**：WildTrack 行人运动极其平稳，恒速外推 2s 的 ADE 仅 15.5cm。
+FDE/ADE=1.73（理论恒速=2.0），说明有轻微转向但不显著。
+学习模型的改进空间非常有限，方向决策详见 `docs/direction_decision_analysis.md`。
+
+### 10.10 三级评估完整结果（Run 30265419077 + 30510404162）
+
+| Level | MOTA | IDF1 | IDSW | FP | FN | Advection AUPRC | Persistence AUPRC |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| L1 (GT+GT) | 0.9390 | 0.9691 | 0 | 12 | 28 | 0.7645 | 0.5224 |
+| L2 (Det+GT) | 0.8841 | 0.9410 | 2 | 8 | 66 | 0.6697 | 0.5506 |
+| L3 (Det+Trk) | 0.7866 | 0.9063 | 18 | 56 | 66 | 0.6550 | 0.5389 |
+
+**误差分解洞察**：
+- 检测器引入 FN +38 (28→66)：约 10% miss rate
+- Tracker 引入 FP +48 (8→56), IDSW +16 (2→18)：关联错误是主要瓶颈
+- 场预测对 ID error 鲁棒：Advection AUPRC 仅降 14% (0.7645→0.6550)
