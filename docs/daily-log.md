@@ -44,15 +44,22 @@ NN tracker 结果（供参考）：
 
 | 文件 | 说明 |
 |------|------|
-| `scripts/run_m2_pipeline.py` | 集成 `evaluate_trajectory_baseline()` 到 pipeline 末尾 |
+| `scripts/run_m2_pipeline.py` | 集成 `evaluate_trajectory_baseline()` + MLP 训练 + L3 diagnostics |
+| `src/temporal/mlp_predictor.py` (新建) | 2-layer MLP 轨迹预测器 (numpy-only, 5-seed) |
+| `src/temporal/tracker_diagnostics.py` (新建) | IDSW/FP 逐事件诊断 |
+| `tests/test_mlp_predictor.py` (新建) | 7 tests |
+| `tests/test_tracker_diagnostics.py` (新建) | 8 tests |
+| `docs/direction_decision_analysis.md` (新建) | 方向决策分析文档 |
 | `docs/active_plan.md` | 三级对比表 + 洞察更新 |
+| `docs/research_progress.md` | 10.8-10.10 节更新 |
 | `docs/daily-log.md` | 07-30 日志 |
 
 ### 待解决
 
-- [ ] 提交并触发 `colab-m2-pipeline.yml` with `train_run_id=29345199882` → 产出 ADE/FDE
-- [ ] 根据 ADE/FDE 做方向决策
-- [ ] 考虑改进 L3 tracker：降低 FP（dist_gate 调参 or 更激进的 min_hits）
+- [ ] 等 pipeline run 30511632914 完成 → MLP vs constant-velocity 对比 + IDSW 诊断
+- [ ] 根据 MLP 结果决定：超越 baseline → 继续优化 / 未超越 → 记录负实验
+- [ ] 根据 IDSW 诊断改进 tracker 参数（dist_gate, min_hits）
+- [ ] 考虑 Hub 场景标定后的高密度数据验证
 
 ---
 
