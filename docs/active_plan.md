@@ -22,7 +22,8 @@
 | M2-3 场映射+基线 | ✅ **基线有数据** | Advection AUPRC=0.7645, Persistence=0.5224 |
 | M2-4 ConvLSTM | ❌ **负实验** (原分辨率) | AUPRC=0.0301；bev_down=16 时 AUPRC=0.663 ✅ |
 | M2-5 端到端评估 | ✅ **L2&L3 完成** | 见下方三级对比表 |
-| M2-6 轨迹预测 baseline | ✅ 已集成 pipeline | 待触发产出 ADE/FDE |
+| M2-6 轨迹预测 baseline | ✅ 完成 | ADE=0.155m; MLP 负实验 (0.336m) |
+| M2-7 Tracker 优化 | ✅ **网格搜索完成** | max_age=1 → MOTA 0.787→0.822 (+3.5pp) |
 
 ### 三级评估对比（Run 30265419077, 2026-07-27）
 
@@ -55,9 +56,10 @@
 6. **Tracker 是主要瓶颈**：L2→L3 的 IDSW 增长（2→18）和 FP 增长（8→56）是最大退化来源
 
 ### 下一步（按优先级）
-1. **~~触发 L2&L3 评估~~** ✅ 完成（run 30265419077）
-2. **~~产出 ADE/FDE baseline~~** ✅ ADE=0.1555m, FDE=0.2693m（run 30510404162）
-3. **~~MLP 轨迹预测~~** ❌ 负实验（ADE=0.336m, 比 baseline 差 2.2×）
-4. **改进 L3 Tracker**：min_hits 参数网格搜索 → 降低 FP（51/56 FP 是短命 track）
+1. ~~**触发 L2&L3 评估**~~ ✅ 完成（run 30265419077）
+2. ~~**产出 ADE/FDE baseline**~~ ✅ ADE=0.1555m, FDE=0.2693m（run 30510404162）
+3. ~~**MLP 轨迹预测**~~ ❌ 负实验（ADE=0.336m, 比 baseline 差 2.2×）
+4. ~~**改进 L3 Tracker**~~ ✅ 最优: max_age=1, dist_gate=0.75 → MOTA 0.787→0.822
 5. **标定（并行）**：由其他人员独立推进枢纽相机外参现场标定
 6. **标定后**：config/dataset 参数化重构 → Hub 场景首次训练
+7. **论文撰写**：M1(检测超越 MVDet) + M2(tracking+field+trajectory 完整评估)
