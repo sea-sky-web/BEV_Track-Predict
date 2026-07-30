@@ -297,60 +297,107 @@ def fig_field_trajectory():
 
 
 def fig_pipeline_diagram():
-    """Fig 7: System architecture block diagram (clean, minimal)."""
-    fig, ax = plt.subplots(figsize=(DBL_W, 3.0))
-    ax.set_xlim(0, 14)
-    ax.set_ylim(0, 6)
-    ax.axis("off")
+    """Fig 7: Architecture comparison — MVDet vs Ours (paper style)."""
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(DBL_W, 5.5))
 
-    def box(x, y, w, h, text, fc="#f0f0f0", ec="#333", fs=7, bold=False):
-        r = FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.08",
-                           facecolor=fc, edgecolor=ec, linewidth=0.6)
+    for ax in [ax1, ax2]:
+        ax.set_xlim(0, 14)
+        ax.set_ylim(0, 4.2)
+        ax.axis("off")
+
+    def box(ax, x, y, w, h, text, fc="#f7f7f7", ec="#333", fs=6.5, bold=False, lw=0.6):
+        r = FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.06",
+                           facecolor=fc, edgecolor=ec, linewidth=lw)
         ax.add_patch(r)
         weight = "bold" if bold else "normal"
         ax.text(x+w/2, y+h/2, text, ha="center", va="center", fontsize=fs, fontweight=weight)
 
-    def arr(x1, y1, x2, y2):
+    def arr(ax, x1, y1, x2, y2, text="", color="#333"):
         ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
-                    arrowprops=dict(arrowstyle="-|>", color="#333", lw=0.6,
-                                    connectionstyle="arc3,rad=0"))
+                    arrowprops=dict(arrowstyle="-|>", color=color, lw=0.6))
+        if text:
+            mx, my = (x1+x2)/2, (y1+y2)/2 + 0.12
+            ax.text(mx, my, text, fontsize=5.5, ha="center", color="#555")
 
-    # Module 1
-    ax.text(3.2, 5.7, "Module 1: Multi-View BEV Detection", fontsize=8, fontweight="bold", ha="center")
-    box(0.3, 4.8, 2.2, 0.6, "Multi-view\nImages", "#fff3e0", "#e65100")
-    arr(2.5, 5.1, 2.8, 5.1)
-    box(2.8, 4.8, 2.0, 0.6, "MobileNet-V2\n(0.6M)", "#e8f5e9", "#2e7d32")
-    arr(4.8, 5.1, 5.1, 5.1)
-    box(5.1, 4.8, 2.2, 0.6, "Geo-Confidence\nFusion (1.84M)", "#e3f2fd", "#1565c0")
-    arr(5.1+2.2, 5.1, 5.1+2.5, 5.1)
-    box(7.6, 4.8, 1.6, 0.6, "BEV Head\n(2.4M)", "#f3e5f5", "#6a1b9a")
-    arr(9.2, 5.1, 9.5, 5.1)
-    box(9.5, 4.8, 2.0, 0.6, "Detections\nMODA=0.895", "#c8e6c9", "#1b5e20", bold=True)
+    # ─── (a) MVDet baseline ───
+    ax1.text(0.1, 3.9, "(a) MVDet [Hou et al., ECCV 2020]", fontsize=8, fontweight="bold")
+    ax1.text(11.5, 3.9, "32.7M params | 0.62 FPS", fontsize=7, color=C["gray"], ha="right")
 
-    # Module 2
-    ax.text(7.0, 3.8, "Module 2: Temporal Prediction", fontsize=8, fontweight="bold", ha="center")
-    arr(10.5, 4.8, 10.5, 3.5)
+    # Input
+    box(ax1, 0.2, 2.4, 1.6, 1.2, "Multi-View\nImages\n$7\\times$1080$\\times$1920", "#fff8e1", "#f57f17", 6)
+    arr(ax1, 1.8, 3.0, 2.2, 3.0)
 
-    box(0.3, 2.5, 2.0, 0.6, "GT Annotations\n(personID)", "#f5f5f5", "#616161")
-    box(2.8, 2.5, 2.2, 0.6, "Kalman Tracker\n(MOTA=0.82)", "#e8f5e9", "#2e7d32")
-    arr(2.3, 2.8, 2.8, 2.8)
-    arr(4.5, 3.5, 3.9, 3.1)
-    box(4.5, 3.0, 2.0, 0.5, "Det. JSONL", "#fff8e1", "#f57f17", fs=6)
+    # Backbone
+    box(ax1, 2.2, 2.5, 2.0, 1.0, "ResNet-18\n(shared)\n11.2M", "#e8f5e9", "#2e7d32", 6.5)
+    arr(ax1, 4.2, 3.0, 4.6, 3.0)
 
-    box(5.5, 2.5, 2.0, 0.6, "Occupancy +\nVelocity Field", "#e0f7fa", "#00695c")
-    box(8.0, 2.5, 2.2, 0.6, "Field Advection\nAUPRC=0.76", "#c8e6c9", "#1b5e20")
-    box(10.7, 2.5, 2.2, 0.6, "Const-Vel Pred\nADE=0.155m", "#c8e6c9", "#1b5e20")
+    # Warp
+    box(ax1, 4.6, 2.6, 1.6, 0.8, "Homography\nWarp", "#f5f5f5", "#616161", 6)
+    arr(ax1, 6.2, 3.0, 6.6, 3.0)
 
-    arr(5.0, 2.8, 5.5, 2.8)
-    arr(7.5, 2.8, 8.0, 2.8)
-    arr(5.0, 2.5, 5.0, 1.5)
+    # Concat
+    box(ax1, 6.6, 2.4, 2.4, 1.2, "Concatenation\n$7 \\times 512 + 2 = 3586$ ch", "#ffcdd2", "#b71c1c", 6.5, bold=True)
+    arr(ax1, 9.0, 3.0, 9.4, 3.0)
 
-    # Three-level evaluation
-    box(0.3, 0.8, 3.5, 0.6, "Three-Level Evaluation\nL1(GT) / L2(Det+GT) / L3(Det+Trk)", "#fce4ec", "#880e4f", fs=6.5)
-    arr(3.9, 2.5, 2.0, 1.4)
-    arr(10.7, 2.5, 10.7, 1.5)
-    box(9.5, 0.8, 3.0, 0.6, "Error Decomposition\nDet: +FN | Trk: +FP, +IDSW", "#fce4ec", "#880e4f", fs=6.5)
+    # BEV Head
+    box(ax1, 9.4, 2.5, 2.2, 1.0, "BEV Head\n3-layer dilated CNN\n18.9M", "#e8eaf6", "#283593", 6.5)
+    arr(ax1, 11.6, 3.0, 12.0, 3.0)
 
+    # Output
+    box(ax1, 12.0, 2.7, 1.6, 0.6, "BEV Heatmap\n$120\\times360$", "#e0f2f1", "#00695c", 6)
+
+    # Dimensions annotation below
+    ax1.text(3.2, 2.1, "$7\\times512\\times135\\times240$", fontsize=5.5, ha="center", color=C["gray"])
+    ax1.text(5.4, 2.2, "$7\\times512\\times120\\times360$", fontsize=5.5, ha="center", color=C["gray"])
+    ax1.text(7.8, 1.9, "$3586\\times120\\times360$", fontsize=5.5, ha="center", color=C["red"])
+
+    # Problem highlight
+    ax1.text(7.0, 0.8, "Channels grow linearly with $V$", fontsize=6.5, ha="center", color=C["red"])
+    ax1.text(7.0, 0.4, "MobileNet-V2 + Concat $\\rightarrow$ OOM on T4 (15 GB)", fontsize=6, ha="center", color=C["red"])
+
+    # ─── (b) Ours ───
+    ax2.text(0.1, 3.9, "(b) Ours: Lightweight Attention Fusion", fontsize=8, fontweight="bold")
+    ax2.text(11.5, 3.9, "5.7M params | 0.96 FPS", fontsize=7, color=C["green"], ha="right")
+
+    # Input
+    box(ax2, 0.2, 2.4, 1.6, 1.2, "Multi-View\nImages\n$7\\times$1080$\\times$1920", "#fff8e1", "#f57f17", 6)
+    arr(ax2, 1.8, 3.0, 2.2, 3.0)
+
+    # Backbone
+    box(ax2, 2.2, 2.5, 2.0, 1.0, "MobileNet-V2\n(truncated)\n0.6M", "#e8f5e9", "#2e7d32", 6.5)
+    arr(ax2, 4.2, 3.0, 4.6, 3.0)
+
+    # Warp
+    box(ax2, 4.6, 2.6, 1.6, 0.8, "Homography\nWarp", "#f5f5f5", "#616161", 6)
+    arr(ax2, 6.2, 3.0, 6.6, 3.0)
+
+    # Attention Fusion
+    box(ax2, 6.6, 2.3, 2.4, 1.4, "Geo-Confidence\nAttention Fusion\n$\\sum_v w_v \\cdot F_v$\n1.84M", "#c8e6c9", "#1b5e20", 6.5, bold=True)
+
+    # Geometry prior input
+    box(ax2, 6.8, 0.8, 2.0, 0.7, "Geometry Prior\nvalid / border / coverage", "#f5f5f5", "#616161", 5.5)
+    arr(ax2, 7.8, 1.5, 7.8, 2.3, "", "#009e73")
+
+    arr(ax2, 9.0, 3.0, 9.4, 3.0)
+
+    # BEV Head
+    box(ax2, 9.4, 2.5, 2.2, 1.0, "BEV Head\n3-layer dilated CNN\n2.4M", "#e8eaf6", "#283593", 6.5)
+    arr(ax2, 11.6, 3.0, 12.0, 3.0)
+
+    # Output
+    box(ax2, 12.0, 2.7, 1.6, 0.6, "BEV Heatmap\n$120\\times360$", "#e0f2f1", "#00695c", 6)
+
+    # Dimensions
+    ax2.text(3.2, 2.1, "$7\\times512\\times135\\times240$", fontsize=5.5, ha="center", color=C["gray"])
+    ax2.text(5.4, 2.2, "$7\\times512\\times120\\times360$", fontsize=5.5, ha="center", color=C["gray"])
+    ax2.text(7.8, 1.8, "$514\\times120\\times360$", fontsize=5.5, ha="center", color=C["green"])
+
+    # Advantage highlight
+    ax2.text(10.5, 0.6, "Fixed 514 ch (independent of $V$)", fontsize=6.5, ha="center", color=C["green"])
+    ax2.text(10.5, 0.2, "MODA 0.8950 (+4.9 pp), params $-$82.6%, FPS +55%",
+             fontsize=6.5, ha="center", color=C["green"], fontweight="bold")
+
+    plt.tight_layout(h_pad=1.0)
     plt.savefig(OUT / "fig7_pipeline.png")
     plt.close()
     print("  [7] pipeline")
