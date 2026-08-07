@@ -207,88 +207,6 @@ def compute_valid_ratio_from_homography(
     return float(valid.mean())
 
 
-def compute_bev_geometry_metadata(
-    proj_mats: torch.Tensor,
-    src_hw: Tuple[int, int],
-    dst_hw: Tuple[int, int],
-) -> torch.Tensor:
-    """Compute static per-view geometry metadata for each BEV cell.
-
-    Uses the same inverse-homography math as warp_perspective_torch to
-    determine, for each view and BEV position, whether the projection is
-    valid and how far from the image border it lands.
-
-    Args:
-        proj_mats: (V, 3, 3) homography matrices (image feat → BEV grid).
-        src_hw: (Hf, Wf) source feature-plane spatial size.
-        dst_hw: (Hb, Wb) destination BEV grid spatial size.
-
-    Returns:
-        (V, 3, Hb, Wb) float32 tensor with channels:
-            0 - valid_mask:     1.0 if BEV cell maps to a valid image region
-            1 - border_margin:  normalised distance to nearest image edge (0–1)
-            2 - coverage_count: fraction of views with valid coverage (shared)
-    """
-    V = proj_mats.shape[0]
-    Hs, Ws = src_hw
-    Hd, Wd = dst_hw
-
-    xs = torch.arange(Wd, dtype=torch.float64)
-    ys = torch.arange(Hd, dtype=torch.float64)
-    yy, xx = torch.meshgrid(ys, xs, indexing="ij")
-    ones = torch.ones_like(xx)
-    dst_h = torch.stack([xx, yy, ones], dim=0).reshape(3, -1).to(proj_mats.device)  # (3, Hd*Wd)
-
-    half_min = min(Hs, Ws) / 2.0
-    per_view = []
-    valid_masks = []
-
-    for vi in range(V):
-        M = proj_mats[vi].to(torch.float64)
-        try:
-            M_inv = torch.linalg.inv(M)
-        except Exception:
-            vm = torch.zeros(Hd, Wd, dtype=torch.float32, device=proj_mats.device)
-            bm = torch.zeros(Hd, Wd, dtype=torch.float32, device=proj_mats.device)
-            per_view.append(torch.stack([vm, bm]))
-            valid_masks.append(vm)
-            continue
-
-        src_h = M_inv @ dst_h  # (3, Hd*Wd)
-        z = src_h[2]
-        z_safe = z.clone()
-        z_safe[z_safe.abs() < 1e-6] = 1e-6
-        x = src_h[0] / z_safe
-        y = src_h[1] / z_safe
-
-        valid = (
-            torch.isfinite(x) & torch.isfinite(y) & torch.isfinite(z)
-            & (z > 1e-6)
-            & (x >= 0) & (x <= Ws - 1)
-            & (y >= 0) & (y <= Hs - 1)
-        )
-        vm = valid.float().reshape(Hd, Wd).to(torch.float32)
-
-        dx = torch.minimum(x, torch.tensor(Ws - 1, dtype=torch.float64, device=x.device) - x)
-        dy = torch.minimum(y, torch.tensor(Hs - 1, dtype=torch.float64, device=y.device) - y)
-        margin = torch.minimum(dx, dy) / half_min
-        margin = margin.clamp(0.0, 1.0)
-        margin[~valid] = 0.0
-        bm = margin.reshape(Hd, Wd).to(torch.float32)
-
-        per_view.append(torch.stack([vm, bm]))  # (2, Hd, Wd)
-        valid_masks.append(vm)
-
-    coverage = torch.stack(valid_masks).sum(dim=0) / V  # (Hd, Wd)
-    coverage = coverage.unsqueeze(0)  # (1, Hd, Wd)
-
-    result = []
-    for pv in per_view:
-        result.append(torch.cat([pv, coverage], dim=0))  # (3, Hd, Wd)
-
-    return torch.stack(result)  # (V, 3, Hd, Wd)
-
-
 def warp_perspective_torch(
     src: torch.Tensor,
     M_src2dst: torch.Tensor,
@@ -384,12 +302,6 @@ def warp_perspective_torch(
     y_norm = torch.where(invalid, torch.full_like(y_norm, 2.0), y_norm)
 
     valid = ~invalid
-    # 恢复 NaN 和 Inf 检查以保证 float32 计算的稳定性
-    valid = valid & torch.isfinite(x) & torch.isfinite(y)
-
-    x_norm = torch.nan_to_num(x_norm, nan=2.0, posinf=2.0, neginf=-2.0)
-    y_norm = torch.nan_to_num(y_norm, nan=2.0, posinf=2.0, neginf=-2.0)
-
     in_bounds = valid & (
         x >= 0.0) & (
         x <= float(
@@ -399,7 +311,6 @@ def warp_perspective_torch(
                     y <= float(
                         Hs -
                         1))
-
     if min_valid_ratio > 0.0:
         valid_ratio = float(in_bounds.float().mean().item())
         if valid_ratio < min_valid_ratio:
