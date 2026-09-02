@@ -6,6 +6,52 @@
 
 ---
 
+## 2026-09-02 — 全仓库论文可投稿性审计
+
+### 进展
+
+- 完成全仓库逐文件阅读审计（`src/`、`src/temporal/`、`scripts/`、`docs/`、`tests/`、`ai_runs/`、workflows）
+- 实跑测试套件：137 测试，1 失败（浮点舍入，非功能 bug）
+- 产出 `docs/paper_readiness_audit.md`（A1–A12 代码缺陷 + B1–B6 协议问题 + C1–C3 Module 2 问题 + D1–D9 论文未完成项）
+- 覆盖 `docs/active_plan.md` 为审计驱动的修复计划（P0→P1→P2→P3 优先级排序）
+- 追加 `docs/LESSONS.md`（B12–B17 实验教训 + Part A 方法论规则 #9）
+- 给 `docs/research_progress.md` 顶部加结果有效性声明
+- 建 `ai_runs/20260902_082709/` 迭代记录
+
+### 关键发现
+
+**致命（P0）**：
+1. **B1**：头条 MODA 0.8950 是对测试集 132 组超参取 argmax，违反仓库自己的固定阈值规则
+2. **A3**：评估 GT 来自 `adaptive_max_pool2d` 池化热力图，非原始标注，`n_gt` 系统性低估
+3. **A4**：MODA（Hungarian + 0.5 m）和 P/R/F1（贪心 + 0.3 m）用两套不同匹配器
+4. **D2**：`fig9_tracking.png` 是合成随机游走数据，配"Kalman+Hungarian Tracker, IDSW=0"图注
+5. **C1**：常速度 ADE=0.1555 泄漏未来（中心差分用到 `pos[i+1]`）
+6. **C3**：AUPRC 阈值网格依赖各方法自己的最大值，粒度量级差 20× 以上
+
+### 结论
+
+**当前 `research_progress.md` 表格里没有一个数字可以直接进论文。** 距离可投稿状态需 P0 修复 + 全量重跑 → P1 消融补全 → 写作 → P2 竞争力提升。
+
+### 代码变更
+
+| 文件 | 说明 |
+|------|------|
+| `docs/paper_readiness_audit.md` | 审计文档（A/B/C/D 四组 27 项发现） |
+| `docs/active_plan.md` | 覆盖为审计驱动的修复计划 |
+| `docs/LESSONS.md` | 追加 B12–B17 + Part A 规则 #9 |
+| `docs/daily-log.md` | 本条目 |
+| `docs/research_progress.md` | 顶部加结果有效性声明 + §9 扩充 |
+| `ai_runs/20260902_082709/` | 迭代记录（ai_context.md + metrics.json + train_tail.log + error.log） |
+| `.remember/now.md` | 更新为当前状态 |
+
+### 待解决
+
+- [ ] 用户评审审计文档和修复计划
+- [ ] 按 P0 顺序开始修复（第一步：D2 fig9 替换或删除）
+- [ ] 修复完成后全量重跑 → 产出可进论文的新数字
+
+---
+
 ## 2026-07-30 — L2/L3 结果确认 + 轨迹评估集成 + MLP 负实验 + IDSW 诊断
 
 ### 进展
