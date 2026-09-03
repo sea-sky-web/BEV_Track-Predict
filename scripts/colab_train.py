@@ -67,6 +67,8 @@ parser.add_argument("--fusion_mode", default="confidence_v2",
 parser.add_argument("--backbone", default="resnet18",
                     choices=["resnet18", "resnet50", "mobilenet_v2"],
                     help="Backbone network (resnet18 = MVDet baseline)")
+parser.add_argument("--branch", default=None,
+                    help="Git branch to checkout after clone (default: repo default branch)")
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
@@ -94,6 +96,11 @@ else:
                 shutil.move(str(tmp), str(dest))
     else:
         run(["git", "clone", REPO_URL, str(REPO_DIR)])
+
+if args.branch:
+    run(["git", "-C", str(REPO_DIR), "fetch", "origin", args.branch], check=False)
+    run(["git", "-C", str(REPO_DIR), "checkout", args.branch])
+    run(["git", "-C", str(REPO_DIR), "pull", "--ff-only"], check=False)
 
 os.chdir(str(REPO_DIR))
 
