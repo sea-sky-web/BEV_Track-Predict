@@ -6,6 +6,41 @@
 
 ---
 
+## 2026-09-03 — P0 修复完成（7/7 项代码层修复）
+
+### 进展
+
+按 `active_plan.md` P0 顺序完成全部 7 项修复，134 测试通过（1 个预存失败 A10 除外）。
+
+### 修复清单
+
+| 顺序 | 项 | 文件 | 修复内容 |
+|:---:|------|------|------|
+| 1 | D2 | `scripts/generate_paper_figures.py`, `scripts/run_m2_pipeline.py` | 删除合成 fig9，重写为从 `tracker_trajectories.json` 加载真实数据；pipeline 增加轨迹导出 |
+| 2 | A6 | `src/train_main.py`, `scripts/colab_train.py`, `src/config.py` | 加 `--seed` + `torch.manual_seed`；训练限定 0-319，验证集 320-359；每 epoch 调 `validate()` |
+| 3 | A3 | `src/evaluate_main.py` | 新增 `load_gt_world_positions()` 从 annotation JSON 加载世界坐标 GT；`evaluate_detection` 支持世界坐标匹配 |
+| 4 | A4 | `src/metrics.py` | `compute_moda_modp` 从 Hungarian 改为 greedy nearest-neighbor（CLEAR MOT 标准） |
+| 5 | B1 | `scripts/colab_train.py` | 评估分两步：验证集 (320-359) 网格搜索选超参 → 测试集 (360-399) 固定超参只跑一次 |
+| 6 | C1 | `src/temporal/annotation_reader.py` | `compute_velocities` 从中心差分改为后向差分，消除未来信息泄漏 |
+| 7 | C3 | `src/temporal/field_metrics.py` | AUPRC 阈值上界从 `max(pred_max, 1e-6)` 改为 `max(pred_max, 1.0)`，统一跨方法比较 |
+
+### 测试结果
+
+```
+134 passed, 1 pre-existing failure (test_augmentation hflip, A10)
+```
+
+无回归。
+
+### 待解决
+
+- [ ] 全量重跑：Colab 上用修复后代码训练 + 评估 → 产出新的可进论文数字
+- [ ] 多种子运行（3-5 seed），报 mean ± std
+- [ ] 修复后的轨迹预测（后向差分）ADE/FDE + 统一 AUPRC 重跑
+- [ ] 进入 P1 修复（B2 多种子、B3 消融网格、B5 延迟重测、A1 offset head）
+
+---
+
 ## 2026-09-02 — 全仓库论文可投稿性审计
 
 ### 进展
