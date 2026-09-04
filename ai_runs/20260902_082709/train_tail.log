@@ -1,0 +1,15 @@
+# train_tail.log — 20260902_082709
+
+Training not performed in this iteration (audit only).
+
+Test suite run:
+```
+$ cd BEV_Track-Predict && PYTHONPATH=src python3 -m pytest tests -q
+.F...................................................................... [ 52%]
+.................................................................        [100%]
+1 failed, 136 passed in 7.77s
+```
+
+Failed test: tests/test_augmentation.py::test_view_coherent_hflip_flips_images_bev_and_aux_labels
+Root cause: floating-point rounding (~1.9e-9) from `(x-mean)*1.0+mean` path in _photometric
+Verified: torch.allclose(atol=1e-6) passes, map_gt/aux_gt flips are correct

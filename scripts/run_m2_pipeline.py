@@ -54,6 +54,23 @@ def _run_tracker_on_frames(tracker, positions_per_frame, frame_offset):
     return pred_frames
 
 
+def _export_tracker_trajectories(pred_frames, frame_offset, output_path):
+    """Save per-frame tracker output for figure generation."""
+    records = []
+    for fi, pf in enumerate(pred_frames):
+        frame_idx = frame_offset + fi
+        for j in range(pf["positions"].shape[0]):
+            records.append({
+                "frame_index": int(frame_idx),
+                "track_id": int(pf["ids"][j]),
+                "world_x_m": float(pf["positions"][j, 0]),
+                "world_y_m": float(pf["positions"][j, 1]),
+            })
+    with open(output_path, "w") as f:
+        json.dump(records, f)
+    print(f"  [L3] Tracker trajectories saved to {output_path} ({len(records)} records)")
+
+
 def eval_tracking(gt_frames_data, input_positions, frame_offset, level_name):
     """Evaluate NN + Kalman tracking on given input positions."""
     from temporal.tracker_nn import NearestNeighborTracker
@@ -372,6 +389,10 @@ def main():
 
         l3_tracker = KalmanHungarianTracker(dist_gate=1.0, max_age=2, min_hits=2)
         l3_pred_frames = _run_tracker_on_frames(l3_tracker, det_positions_val, val_start)
+
+        # Export per-frame tracker trajectories for figure generation
+        _export_tracker_trajectories(l3_pred_frames, val_start, output_dir / "tracker_trajectories.json")
+
         diag = diagnose_tracker(gt_frames_data, l3_pred_frames, dist_thr=0.5, frame_offset=val_start)
         print(f"\n  [L3/diag] {diag.summary}")
         all_results["L3_diagnostics"] = {

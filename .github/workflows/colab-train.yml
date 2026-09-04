@@ -16,8 +16,8 @@ on:
         default: '1.0'
         required: false
       max_frames:
-        description: '训练帧数上限（MVDet train split = 360）'
-        default: '360'
+        description: '训练帧数上限（train split = 320）'
+        default: '320'
         required: false
       loss_type:
         description: 'BEV loss 类型：mse (baseline) / focal (CenterNet-style)'
@@ -38,6 +38,10 @@ on:
       backbone:
         description: 'Backbone: resnet18 (MVDet baseline) / mobilenet_v2 (lightweight)'
         default: 'resnet18'
+        required: false
+      branch:
+        description: 'Git branch to checkout on Colab (default: workflow trigger branch)'
+        default: ''
         required: false
 
 jobs:
@@ -159,7 +163,8 @@ jobs:
         continue-on-error: true
         run: |
           {
-            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}', '--loss_type', '${{ inputs.loss_type }}', '--offset_weight', '${{ inputs.offset_weight }}', '--fusion_mode', '${{ inputs.fusion_mode }}', '--backbone', '${{ inputs.backbone }}']"
+            BRANCH="${{ inputs.branch || github.ref_name }}"
+            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}', '--loss_type', '${{ inputs.loss_type }}', '--offset_weight', '${{ inputs.offset_weight }}', '--fusion_mode', '${{ inputs.fusion_mode }}', '--backbone', '${{ inputs.backbone }}', '--branch', '${BRANCH}']"
             cat scripts/colab_train.py
           } | colab exec -s bev-train --timeout 7200 > train_exec.log 2>&1 &
           EXEC_PID=$!

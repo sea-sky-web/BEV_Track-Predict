@@ -42,6 +42,7 @@ def compute_moda_modp(
     """
     Compute CLEAR/MVDet-style MODA and MODP for one frame.
 
+    Uses greedy nearest-neighbor matching (CLEAR MOT standard).
     Points must be shaped (N, 2) and expressed in the same distance unit.
     WildTrack evaluation uses meters with a 0.5m matching threshold.
     """
@@ -68,15 +69,22 @@ def compute_moda_modp(
         }
 
     dist = np.sqrt(((pred_pts[:, None, :] - gt_pts[None, :, :]) ** 2).sum(axis=2))
-    row_ind, col_ind = _linear_sum_assignment(dist)
-    matched = dist[row_ind, col_ind] <= d_thresh
-    match_dists = dist[row_ind[matched], col_ind[matched]]
 
+    used_gt = np.zeros(n_gt, dtype=bool)
+    match_dists = []
+    for pi in range(n_pred):
+        d = dist[pi].copy()
+        d[used_gt] = np.inf
+        gi = int(np.argmin(d))
+        if np.isfinite(d[gi]) and d[gi] <= d_thresh:
+            used_gt[gi] = True
+            match_dists.append(d[gi])
+
+    match_dists = np.array(match_dists, dtype=np.float64)
     tp = int(match_dists.shape[0])
     fp = n_pred - tp
     fn = n_gt - tp
-    # MODP = mean(1 - d_i / d_thresh) over matched pairs, range [0, 1]
-    modp_sum = float((1.0 - match_dists / d_thresh).sum())
+    modp_sum = float((1.0 - match_dists / d_thresh).sum()) if tp > 0 else 0.0
     moda = 1.0 - float(fp + fn) / float(n_gt) if n_gt > 0 else (1.0 if fp == 0 else 0.0)
     modp = modp_sum / float(tp) if tp > 0 else 0.0
 

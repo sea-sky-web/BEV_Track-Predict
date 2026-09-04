@@ -53,8 +53,10 @@ parser.add_argument("--epochs", type=int, default=10)
 parser.add_argument("--bev_pos_weight", type=float, default=1.0,
                     help="BEV 正样本损失权重")
 parser.add_argument("--device", default="cuda")
-parser.add_argument("--max_frames", type=int, default=360,
-                    help="Max training frames (MVDet train split = 360)")
+parser.add_argument("--max_frames", type=int, default=320,
+                    help="Max training frames (train split = 320, val = 320-359, test = 360-399)")
+parser.add_argument("--seed", type=int, default=42,
+                    help="Random seed for reproducibility")
 parser.add_argument("--loss_type", default="mse", choices=["mse", "focal"],
                     help="BEV loss: mse (MVDet baseline) or focal (CenterNet-style)")
 parser.add_argument("--offset_weight", type=float, default=0.0,
@@ -65,6 +67,8 @@ parser.add_argument("--fusion_mode", default="confidence_v2",
 parser.add_argument("--backbone", default="resnet18",
                     choices=["resnet18", "resnet50", "mobilenet_v2"],
                     help="Backbone network (resnet18 = MVDet baseline)")
+parser.add_argument("--branch", default=None,
+                    help="Git branch to checkout after clone (default: repo default branch)")
 args = parser.parse_args()
 
 # ── 1. 克隆 / 更新仓库 ────────────────────────────────────────
@@ -92,6 +96,11 @@ else:
                 shutil.move(str(tmp), str(dest))
     else:
         run(["git", "clone", REPO_URL, str(REPO_DIR)])
+
+if args.branch:
+    run(["git", "-C", str(REPO_DIR), "fetch", "origin", args.branch], check=False)
+    run(["git", "-C", str(REPO_DIR), "checkout", args.branch])
+    run(["git", "-C", str(REPO_DIR), "pull", "--ff-only"], check=False)
 
 os.chdir(str(REPO_DIR))
 
@@ -194,7 +203,8 @@ if args.epochs > 0:
     "--optimizer",              "sgd",
     "--scheduler",              "onecycle",
     "--lr_init",                "0.1",
-    "--max_frames",             str(min(args.max_frames, 360) if args.max_frames > 0 else 360),
+    "--max_frames",             str(min(args.max_frames, 320) if args.max_frames > 0 else 320),
+    "--seed",                   str(args.seed),
     "--weight_decay",           "0.0005",
     "--freeze_backbone_epochs", "0",
     "--bev_pos_weight",         str(args.bev_pos_weight),
@@ -214,10 +224,47 @@ else:
     banner("5/6  跳过训练 (epochs=0, eval-only 模式)")
 
 # ── 6. 评估 + 可视化（同一 colab exec，避免 session 死亡）────────
-banner("6/6  检测评估 + 可视化")
+banner("6/7  验证集超参选择 (frames 320-359)")
 
 model_path = REPO_DIR / "outputs/train_multicam_mvdet_style_v3/model_final.pth"
-eval_out   = REPO_DIR / "outputs/eval_results.json"
+val_out    = REPO_DIR / "outputs/val_results.json"
+
+val_cmd = [
+    sys.executable, "src/evaluate_main.py",
+    "--data_root",       str(data_root),
+    "--model_path",      str(model_path),
+    "--device",          args.device,
+    "--report_detection",
+    "--metrics_out",     str(val_out),
+    "--views",           "0,1,2,3,4,5,6",
+    "--fusion_mode",     args.fusion_mode,
+    "--backbone",        args.backbone,
+    "--frame_start",     "320",
+    "--max_frames",      "40",
+    "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.225,0.25,0.275,0.30,0.325,0.35,0.375,0.40,0.425,0.45,0.475,0.50,0.55,0.60",
+    "--det_min_distances=3.0,4.0,5.0,6.0,7.0,8.0",
+    "--loss_type",       args.loss_type,
+]
+if args.offset_weight > 0:
+    val_cmd.append("--use_offset")
+print("命令：", " ".join(val_cmd))
+val_ret = run(val_cmd, cwd=str(REPO_DIR), check=False)
+print(f"\n[VAL] exit code: {val_ret}", flush=True)
+
+best_thr = "0.400"
+best_nms = "6.0"
+if val_out.exists():
+    vr = json.loads(val_out.read_text())
+    best_thr = str(vr.get("det_best_threshold", 0.400))
+    best_nms = str(vr.get("det_best_nms_radius", 6.0))
+    print(f"\n[VAL] Best on validation: threshold={best_thr}, NMS={best_nms}")
+    print(f"[VAL] Val MODA={vr.get('det_moda', 'N/A')}, F1={vr.get('det_f1', 'N/A')}")
+else:
+    print("[WARN] val_results.json not found, using defaults threshold=0.400, NMS=6.0")
+
+banner("7/7  测试集评估 (frames 360-399, fixed hyperparams)")
+
+eval_out = REPO_DIR / "outputs/eval_results.json"
 
 eval_cmd = [
     sys.executable, "src/evaluate_main.py",
@@ -229,10 +276,10 @@ eval_cmd = [
     "--views",           "0,1,2,3,4,5,6",
     "--fusion_mode",     args.fusion_mode,
     "--backbone",        args.backbone,
-    "--frame_start",     "360",    # MVDet test split: last 10% (frames 360-399 of 400 annotations)
+    "--frame_start",     "360",
     "--max_frames",      "40",
-    "--det_thresholds=-0.50,-0.25,-0.10,0.00,0.05,0.10,0.15,0.20,0.225,0.25,0.275,0.30,0.325,0.35,0.375,0.40,0.425,0.45,0.475,0.50,0.55,0.60",
-    "--det_min_distances=3.0,4.0,5.0,6.0,7.0,8.0",
+    f"--det_thresholds={best_thr}",
+    f"--det_min_distances={best_nms}",
     "--loss_type",       args.loss_type,
 ]
 if args.offset_weight > 0:
@@ -241,15 +288,14 @@ print("命令：", " ".join(eval_cmd))
 eval_ret = run(eval_cmd, cwd=str(REPO_DIR), check=False)
 print(f"\n[EVAL] exit code: {eval_ret}", flush=True)
 
-# 把结果直接打印到 stdout（GA 日志捕获，不依赖下载）
 if eval_out.exists():
     r = json.loads(eval_out.read_text())
-    print("\n=== EVAL RESULTS (inline) ===")
+    print("\n=== TEST RESULTS (fixed hyperparams from val) ===")
+    print(f"threshold={best_thr}, NMS={best_nms}")
     for k in ["det_moda", "det_modp", "det_precision", "det_recall", "det_f1",
-              "det_best_threshold", "det_best_nms_radius",
               "det_moda_tp", "det_moda_fp", "det_moda_fn"]:
         print(f"{k}: {r.get(k, 'N/A')}")
-    print("=== END EVAL RESULTS ===", flush=True)
+    print("=== END TEST RESULTS ===", flush=True)
 else:
     print("[WARN] eval_results.json not found", flush=True)
 

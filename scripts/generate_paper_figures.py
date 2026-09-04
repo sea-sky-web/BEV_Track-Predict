@@ -433,60 +433,65 @@ def fig_bev_overlay():
 
 
 def fig_tracking_vis():
-    """Fig 9: Simulated BEV tracking visualization with realistic curved trajectories."""
-    rng = np.random.default_rng(42)
+    """Fig 9: BEV tracking visualization from real Kalman tracker output."""
+    import json as _json
+
+    traj_path = Path(__file__).resolve().parents[1] / "outputs" / "m2_pipeline" / "tracker_trajectories.json"
+    if not traj_path.exists():
+        print("  [SKIP] fig9 — no tracker_trajectories.json (run M2 pipeline first)")
+        return
+
+    with open(traj_path) as f:
+        records = _json.load(f)
+
+    if not records:
+        print("  [SKIP] fig9 — tracker_trajectories.json is empty")
+        return
+
+    # Group by track_id → list of (frame, x, y) sorted by frame
+    tracks = {}
+    for r in records:
+        tid = r["track_id"]
+        tracks.setdefault(tid, []).append((r["frame_index"], r["world_x_m"], r["world_y_m"]))
+    for tid in tracks:
+        tracks[tid].sort(key=lambda t: t[0])
+
     fig, ax = plt.subplots(figsize=(COL_W, 3.0))
-    ax.set_xlim(-3, 9)
-    ax.set_ylim(-9, 3)
     ax.set_aspect("equal")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.grid(True, alpha=0.15, linewidth=0.3)
 
-    n = 15
     cmap = plt.cm.tab10
-    n_steps = 12
+    for i, (tid, pts) in enumerate(tracks.items()):
+        xs = [p[1] for p in pts]
+        ys = [p[2] for p in pts]
+        n_pts = len(xs)
 
-    for i in range(n):
-        start = rng.uniform(low=[-2, -8], high=[8, 2], size=2)
-        vel = rng.uniform(-0.5, 0.5, size=2)
-        # Generate smooth curved trajectory via correlated random walk
-        trajectory = np.zeros((n_steps, 2))
-        trajectory[0] = start
-        ang = np.arctan2(vel[1], vel[0])
-        speed = np.linalg.norm(vel) + 0.3
-
-        for t in range(1, n_steps):
-            ang += rng.normal(0, 0.25)  # gradual direction change
-            speed_t = speed * (1 + rng.normal(0, 0.1))  # speed variation
-            trajectory[t, 0] = trajectory[t-1, 0] + speed_t * np.cos(ang) * 0.5
-            trajectory[t, 1] = trajectory[t-1, 1] + speed_t * np.sin(ang) * 0.5
-
-        # Draw fading trail
-        for j in range(n_steps - 1):
-            alpha = 0.15 + 0.6 * (j / (n_steps - 1))
-            lw = 0.4 + 0.8 * (j / (n_steps - 1))
-            ax.plot(trajectory[j:j+2, 0], trajectory[j:j+2, 1], "-",
+        for j in range(n_pts - 1):
+            alpha = 0.15 + 0.6 * (j / max(n_pts - 1, 1))
+            lw = 0.4 + 0.8 * (j / max(n_pts - 1, 1))
+            ax.plot(xs[j:j+2], ys[j:j+2], "-",
                     color=cmap(i % 10), alpha=alpha, linewidth=lw)
 
-        # Current position (last point)
-        ax.plot(trajectory[-1, 0], trajectory[-1, 1], "o", color=cmap(i % 10),
+        ax.plot(xs[-1], ys[-1], "o", color=cmap(i % 10),
                 markersize=5, markeredgecolor="black", markeredgewidth=0.3)
 
-        # Velocity arrow at current position
-        dx = trajectory[-1, 0] - trajectory[-2, 0]
-        dy = trajectory[-1, 1] - trajectory[-2, 1]
-        ax.arrow(trajectory[-1, 0], trajectory[-1, 1], dx*0.8, dy*0.8,
-                 head_width=0.1, head_length=0.05, fc=cmap(i % 10),
-                 ec=cmap(i % 10), linewidth=0.4)
+        if n_pts >= 2:
+            dx = xs[-1] - xs[-2]
+            dy = ys[-1] - ys[-2]
+            ax.arrow(xs[-1], ys[-1], dx * 0.8, dy * 0.8,
+                     head_width=0.1, head_length=0.05, fc=cmap(i % 10),
+                     ec=cmap(i % 10), linewidth=0.4)
 
-    ax.text(0.02, 0.98, "Kalman+Hungarian Tracker\n15 active tracks, IDSW=0",
+    n_tracks = len(tracks)
+    ax.text(0.02, 0.98, f"Kalman+Hungarian Tracker\n{n_tracks} active tracks",
             transform=ax.transAxes, fontsize=6.5, va="top",
             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="#ccc", linewidth=0.4))
 
     plt.savefig(OUT / "fig9_tracking.png")
     plt.close()
-    print("  [9] tracking")
+    print(f"  [9] tracking ({n_tracks} tracks from real data)")
 
 
 if __name__ == "__main__":

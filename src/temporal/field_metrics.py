@@ -55,8 +55,9 @@ def compute_occupancy_auprc(
     if n_pos == 0:
         return 0.0
 
-    pred_max = pred_f.max() if pred_f.size > 0 else 1.0
-    thresholds = np.linspace(0.0, max(pred_max, 1e-6), n_thresholds + 1)
+    pred_max = pred_f.max() if pred_f.size > 0 else 0.0
+    upper = max(pred_max, 1.0)
+    thresholds = np.linspace(0.0, upper, n_thresholds + 1)
     precisions = []
     recalls = []
 
