@@ -6,6 +6,89 @@
 
 ---
 
+## 2026-09-04 — Colab 训练管线修复 + 首组修正后测试集结果
+
+### 进展
+
+- 诊断全部 6 个 Colab 训练 run 的失败原因
+- 修复 `colab_train.py` 分支切换问题（Colab 始终 clone main 分支，未 checkout 触发分支）
+- 修复 `colab-train.yml` 传递 `--branch` 参数 + `max_frames` 默认值 360→320
+- 成功产出 **ResNet-18 + concat** 修正后测试集结果（首个符合论文标准的数字）
+- MobileNet-V2 + geo_cv1 完成 9/10 epoch 训练（colab exec timeout），eval-only run 已触发
+
+### Colab 训练管线问题诊断
+
+| Run ID | 配置 | 失败原因 |
+|--------|------|----------|
+| 33733305336 | MobileNet-V2 | Colab clone main → `--seed` unrecognized |
+| 33733326115 | MobileNet-V2 | 同上（重复触发） |
+| 33733342605 | MobileNet-V2 | Colab session 冲突 (TooManyAssignments) |
+| 33733358181 | ResNet-18 | 同上，被 cancel |
+| 33735407585 | MobileNet-V2 | gdown 数据集下载失败（与 ResNet run 的 session 冲突） |
+| 33735428270 | ResNet-18 | 训练 5/10 epoch → TimeoutError（有 checkpoint） |
+
+**根因**：`colab_train.py` 在 Colab 上执行 `git clone` 后未 checkout 触发分支，始终用 main 分支代码。
+
+### 代码修复
+
+| 文件 | 修改 |
+|------|------|
+| `scripts/colab_train.py` | 新增 `--branch` 参数；clone 后 `git fetch + checkout` 指定分支 |
+| `.github/workflows/colab-train.yml` | 新增 `branch` input；传递 `github.ref_name`；`max_frames` 默认 360→320 |
+
+Commit: `8501bc1` (branch: `docs/paper-readiness-audit`)
+
+### 测试集结果 — ResNet-18 + concat (MVDet baseline)
+
+**协议**：seed=42, train 0-319, val 320-359 网格搜索, test 360-399 固定超参, 世界坐标 GT, greedy 0.5m 匹配
+
+| 指标 | 值 |
+|------|-----|
+| **MODA** | **0.8036** |
+| **MODP** | 0.7356 |
+| Precision | 0.9682 |
+| Recall | 0.8309 |
+| F1 | 0.8943 |
+| Threshold (val) | 0.225 |
+| NMS (val) | 8.0 |
+| TP / FP / FN | 791 / 26 / 161 |
+
+来源：Run 33747560484 (eval-only, checkpoint from Run 33735428270, 5-epoch)
+
+### MobileNet-V2 + geo_cv1 训练曲线（9 epoch, Run 33755384172）
+
+| Epoch | Train Loss | BEV Loss | SNR | Val Loss | Val SNR |
+|-------|-----------|----------|-----|----------|---------|
+| 0 | 0.01186 | 0.01019 | 0.201 | 0.00619 | 0.202 |
+| 1 | 0.00754 | 0.00656 | 0.272 | 0.00242 | 0.341 |
+| 2 | 0.00495 | 0.00409 | 0.298 | 0.00200 | 0.336 |
+| 3 | 0.00416 | 0.00333 | 0.313 | 0.00204 | 0.340 |
+| 4 | 0.00375 | 0.00293 | 0.322 | 0.00194 | 0.373 |
+| 5 | 0.00352 | 0.00270 | 0.330 | 0.00178 | 0.378 |
+| 6 | 0.00330 | 0.00248 | 0.336 | 0.00172 | 0.341 |
+| 7 | 0.00314 | 0.00232 | 0.342 | 0.00197 | 0.437 |
+| 8 | 0.00296 | 0.00214 | 0.348 | 0.00172 | 0.359 |
+
+Epoch 9 训练中 colab exec timeout。Val loss 在 epoch 6-8 趋于平稳（~0.0017），模型已收敛。
+
+### 分析
+
+1. **ResNet-18 MODA 0.804**（修正协议） vs 旧数据 0.846（旧协议）：下降合理，因为旧数据存在测试集调参、池化 GT、训练含 test 帧等污染
+2. **Precision 极高 (96.8%) 但 Recall 偏低 (83.1%)**：仅 5 epoch 训练，模型偏保守；FN=161 占总 GT 的 ~17%
+3. **colab download 始终无法拉取文件**：path 存在但 API 返回 "not found"，疑似 Colab filesystem 隔离。目前靠 artifact 上传的 checkpoint 做 eval-only 绕过
+4. **MobileNet-V2 训练收敛良好**：9 epoch val loss 0.0017，checkpoint 21.7MB 已上传 artifact，待 eval
+
+### 待解决
+
+- [x] ResNet-18 eval-only → 测试集结果 ✅
+- [ ] MobileNet-V2 eval-only (Run 33829519054) → 待拉取结果
+- [ ] 两模型对比表 → 更新 active_plan.md
+- [ ] P1 多种子 (3-5 seed) mean ± std
+- [ ] ResNet-18 补完 10 epoch（当前仅 5 epoch）
+- [ ] MobileNet-V2 补完 10 epoch（当前仅 9 epoch）
+
+---
+
 ## 2026-09-03 — P0 修复完成（7/7 项代码层修复）
 
 ### 进展
@@ -529,3 +612,6 @@ MVDet 论文报告 0.882（MATLAB eval）；MVDet 代码自带的 Python eval �
 | 07-14 | MobileNet-V2 backbone + gradient checkpointing | — | 5.7M |
 | **07-14** | **🏆 MODA 0.8950 — 超越 MVDet (0.882)，参数 -82.6%，速度 +55%** | **0.8950** | **5.7M** |
 | 07-27 | M2 主线推进：workflow 修复 + 轨迹预测 baseline + 测试补齐 + 标定参数化 | — | — |
+| 09-02 | 全仓库论文可投稿性审计（27 项发现） | — | — |
+| 09-03 | P0 修复完成（7/7 项），触发全量重跑 | — | — |
+| **09-04** | **首个修正协议测试集结果：ResNet-18 baseline** | **0.804** | 32.7M |
