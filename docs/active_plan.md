@@ -40,14 +40,16 @@ P0 代码修复已全部完成（2026-09-03）。Colab 训练管线已修复（�
 
 ### 首轮重跑结果（2026-09-04）
 
-| 模型 | Epochs | MODA | MODP | P | R | F1 | Threshold | NMS | TP/FP/FN |
-|------|:------:|:----:|:----:|:---:|:---:|:---:|:---------:|:---:|----------|
-| ResNet-18 + concat | 5 | **0.8036** | 0.7356 | 0.9682 | 0.8309 | 0.8943 | 0.225 | 8.0 | 791/26/161 |
-| MobileNet-V2 + geo_cv1 | 9 | *待 eval* | — | — | — | — | — | — | — |
+| 模型 | Params | Epochs | MODA | MODP | P | R | F1 | Threshold | NMS | TP/FP/FN |
+|------|:------:|:------:|:----:|:----:|:---:|:---:|:---:|:---------:|:---:|----------|
+| ResNet-18 + concat | 32.7M | 5 | 0.8036 | 0.7356 | **0.9682** | 0.8309 | 0.8943 | 0.225 | 8.0 | 791/26/161 |
+| MobileNet-V2 + geo_cv1 | **5.7M** | 9 | **0.8445** | **0.7495** | 0.9094 | **0.9380** | **0.9235** | 0.225 | 8.0 | 893/89/59 |
 
-协议：seed=42, train 0-319, val 320-359 选超参, test 360-399 固定超参, 世界坐标 GT, greedy 0.5m
+**Δ (Ours − Baseline)**: MODA **+4.1pp**, MODP +1.4pp, Recall **+10.7pp**, F1 +2.9pp, Precision -5.9pp, 参数量 **5.7× 缩减**
 
-**注**：ResNet-18 仅 5 epoch（colab exec timeout），MobileNet-V2 仅 9 epoch。完整 10 epoch 待补跑。
+协议：seed=42, train 0-319, val 320-359 grid-search 选超参, test 360-399 固定超参, 世界坐标 GT, greedy 0.5m
+
+**注**：ResNet-18 仅 5 epoch（colab exec timeout），MobileNet-V2 仅 9 epoch。完整 10 epoch 待补跑。两模型 val 均选出 threshold=0.225 / NMS=8.0。
 
 ### P0 修复顺序 — ✅ 全部完成（2026-09-03）
 

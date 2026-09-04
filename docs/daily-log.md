@@ -71,18 +71,61 @@ Commit: `8501bc1` (branch: `docs/paper-readiness-audit`)
 
 Epoch 9 训练中 colab exec timeout。Val loss 在 epoch 6-8 趋于平稳（~0.0017），模型已收敛。
 
+### 测试集结果 — MobileNet-V2 + geo_confidence_v1 (Proposed)
+
+**协议**：同上。Checkpoint: 9-epoch (Run 33755384172), eval-only Run 33829519054。
+
+**Val sweep (frames 320-359)**:
+
+| NMS | Best Threshold | MODA | F1 |
+|:---:|:--------------:|:----:|:--:|
+| 3.0 | 0.600 | 0.6829 | 0.8228 |
+| 4.0 | 0.475 | 0.8521 | 0.9226 |
+| 5.0 | 0.400 | 0.8918 | 0.9435 |
+| 6.0 | 0.275 | 0.9055 | 0.9520 |
+| 7.0 | 0.275 | 0.9146 | 0.9561 |
+| **8.0** | **0.225** | **0.9162** | **0.9573** |
+
+Val best: threshold=0.225, NMS=8.0, MODA=0.9162
+
+**Test set (frames 360-399, fixed hyperparams)**:
+
+| 指标 | 值 |
+|------|-----|
+| **MODA** | **0.8445** |
+| **MODP** | 0.7495 |
+| Precision | 0.9094 |
+| Recall | 0.9380 |
+| F1 | 0.9235 |
+| TP / FP / FN | 893 / 89 / 59 |
+| Loc Error | 0.125 m |
+| n_gt | 952 |
+
+### 两模型对比
+
+| 模型 | Params | MODA | MODP | P | R | F1 | TP/FP/FN |
+|------|:------:|:----:|:----:|:---:|:---:|:---:|----------|
+| ResNet-18 + concat | 32.7M | 0.8036 | 0.7356 | **0.9682** | 0.8309 | 0.8943 | 791/26/161 |
+| **MobileNet-V2 + geo_cv1** | **5.7M** | **0.8445** | **0.7495** | 0.9094 | **0.9380** | **0.9235** | 893/89/59 |
+
+**Δ**: MODA **+4.1pp**, MODP +1.4pp, Recall **+10.7pp**, F1 +2.9pp, Precision -5.9pp, 参数量 **5.7× 缩减**
+
 ### 分析
 
 1. **ResNet-18 MODA 0.804**（修正协议） vs 旧数据 0.846（旧协议）：下降合理，因为旧数据存在测试集调参、池化 GT、训练含 test 帧等污染
 2. **Precision 极高 (96.8%) 但 Recall 偏低 (83.1%)**：仅 5 epoch 训练，模型偏保守；FN=161 占总 GT 的 ~17%
 3. **colab download 始终无法拉取文件**：path 存在但 API 返回 "not found"，疑似 Colab filesystem 隔离。目前靠 artifact 上传的 checkpoint 做 eval-only 绕过
-4. **MobileNet-V2 训练收敛良好**：9 epoch val loss 0.0017，checkpoint 21.7MB 已上传 artifact，待 eval
+4. **MobileNet-V2 训练收敛良好**：9 epoch val loss 0.0017，checkpoint 21.7MB 已上传 artifact
+5. **MobileNet-V2 MODA 0.845 > ResNet-18 0.804**（+4.1pp）：在修正协议下 proposed method 仍然显著优于 baseline，且参数量缩减 5.7×
+6. **Recall 差异显著**：MobileNet-V2 Recall=0.938 vs ResNet-18 Recall=0.831（+10.7pp），FN 从 161 降至 59；代价是 FP 从 26 增至 89
+7. **两模型 val 均选出 threshold=0.225 / NMS=8.0**：一致的超参选择增强了结果可比性
+8. **修正协议 MODA 0.845 vs 旧协议 0.895**：下降 5.0pp，旧数据的测试集调参（132 组 argmax）+ 池化 GT + 训练含 test 帧等污染使旧数字虚高
 
 ### 待解决
 
 - [x] ResNet-18 eval-only → 测试集结果 ✅
-- [ ] MobileNet-V2 eval-only (Run 33829519054) → 待拉取结果
-- [ ] 两模型对比表 → 更新 active_plan.md
+- [x] MobileNet-V2 eval-only (Run 33829519054) → 结果已拉取 ✅
+- [x] 两模型对比表 → active_plan.md 已更新 ✅
 - [ ] P1 多种子 (3-5 seed) mean ± std
 - [ ] ResNet-18 补完 10 epoch（当前仅 5 epoch）
 - [ ] MobileNet-V2 补完 10 epoch（当前仅 9 epoch）
@@ -614,4 +657,5 @@ MVDet 论文报告 0.882（MATLAB eval）；MVDet 代码自带的 Python eval �
 | 07-27 | M2 主线推进：workflow 修复 + 轨迹预测 baseline + 测试补齐 + 标定参数化 | — | — |
 | 09-02 | 全仓库论文可投稿性审计（27 项发现） | — | — |
 | 09-03 | P0 修复完成（7/7 项），触发全量重跑 | — | — |
-| **09-04** | **首个修正协议测试集结果：ResNet-18 baseline** | **0.804** | 32.7M |
+| 09-04 | 首个修正协议测试集结果：ResNet-18 baseline | 0.804 | 32.7M |
+| **09-04** | **MobileNet-V2 修正协议测试集结果，两模型对比完成** | **0.845** | **5.7M** |

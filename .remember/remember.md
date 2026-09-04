@@ -45,8 +45,8 @@ detection_loader.py, convlstm.py, temporal_loss.py, temporal_dataset.py,
 temporal_trainer.py, train_temporal_main.py, **trajectory_predictor.py** (新增)
 
 ## Next
-1. **MobileNet-V2 eval-only**：Run 33829519054 待拉取（9-epoch checkpoint）
-2. **两模型对比表**：ResNet-18 (MODA 0.804) vs MobileNet-V2 (待出)
+1. ~~MobileNet-V2 eval-only~~ ✅ MODA 0.8445
+2. ~~两模型对比表~~ ✅ MobileNet-V2 全面领先 (+4.1pp MODA, 5.7× fewer params)
 3. **补完 10 epoch**：ResNet-18 (当前 5) + MobileNet-V2 (当前 9)
 4. **多种子**：3-5 seed，报 mean ± std（P1 B2）
 5. **M2 重跑**：后向差分常速度 + 统一 AUPRC → MLP vs 常速度结论可能反转
@@ -58,8 +58,10 @@ temporal_trainer.py, train_temporal_main.py, **trajectory_predictor.py** (新增
 - **修正后 checkpoint**:
   - ResNet-18+concat: Run 33735428270 artifact (125MB, 5-epoch, seed=42)
   - MobileNet-V2+geo_cv1: Run 33755384172 artifact (21.7MB, 9-epoch, seed=42)
-- **修正后 eval 结果**: ResNet-18 Run 33747560484 → MODA 0.8036
-- **MobileNet-V2 eval-only**: Run 33829519054 (待拉取)
+- **修正后 eval 结果**:
+  - ResNet-18: Run 33747560484 → MODA 0.8036, MODP 0.7356, P 0.9682, R 0.8309, F1 0.8943
+  - MobileNet-V2: Run 33829519054 → MODA 0.8445, MODP 0.7495, P 0.9094, R 0.9380, F1 0.9235
+- **两模型均选出 threshold=0.225, NMS=8.0**
 - 旧 checkpoint (main分支, 360帧训练): Run 29345199882 — 不可用于论文
 - Colab 训练管线修复: commit 8501bc1 (--branch 参数 + max_frames 320)
 - colab download API 无法拉取文件（path 存在但返回 not found），靠 artifact + eval-only 绕过
