@@ -79,17 +79,20 @@ def build_mvdet_proj_mat(
         2. → 世界坐标系 (X, Y, 1) via worldgrid2worldcoord
         3. → 相机坐标系 (Xc, Yc, Zc) via [R|t]
         4. → 图像坐标系 (u, v, 1) via K
-        5. → 图像特征平面 (u', v', 1) via permutation
     
-    数学推导（对标 MVDet 源码）：
+    数学推导：
         extr = [R | t]  (3x4 矩阵：world to camera)
         extr_3x3 = extr[:, :3]  (移除 Z 列)
         worldcoord2imgcoord = K @ extr_3x3
         worldgrid2imgcoord = worldcoord2imgcoord @ worldgrid2worldcoord
         imgcoord2worldgrid = inv(worldgrid2imgcoord)
-        proj_mat = permutation @ imgcoord2worldgrid
+        proj_mat = imgcoord2worldgrid
     
-    其中 permutation 用于交换 (u, v) 坐标顺序。
+    当前主链路的 BEV 张量约定是 [H=Y, W=X]，即 dataset.py 以
+    map_gt[0, iy, ix] 写标签，warp_perspective_torch 也以目标网格
+    [x=col, y=row, 1] 采样。因此这里不能沿用 MVDet 原始 WildTrack
+    ij-indexing 版本中的 x/y permutation，否则投影特征会进入与标签
+    不一致的 reduced BEV 坐标系。
     
     Args:
         K_feat: 缩放后的相机内参 (3, 3)
@@ -130,21 +133,10 @@ def build_mvdet_proj_mat(
     # 世界网格坐标到图像坐标的变换
     worldgrid2imgcoord = worldcoord2imgcoord @ worldgrid2worldcoord  # (3, 3)
     
-    # 反向变换：图像坐标回到世界网格坐标
+    # 反向变换：图像坐标回到当前 [x=col, y=row] reduced BEV 网格坐标
     imgcoord2worldgrid = np.linalg.inv(worldgrid2imgcoord)
-    
-    # 交换坐标顺序的排列矩阵
-    # 从 (u, v, 1) 到 (v, u, 1)（或反之）
-    # 这确保与 MVDet 源码的坐标约定一致
-    permutation = np.array([
-        [0, 1, 0],
-        [1, 0, 0],
-        [0, 0, 1]
-    ], dtype=np.float64)
-    
-    proj = permutation @ imgcoord2worldgrid
-    
-    return proj
+
+    return imgcoord2worldgrid
 
 
 def compute_valid_ratio_from_homography(
