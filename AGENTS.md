@@ -366,3 +366,8 @@ Before proposing any approach, read `docs/LESSONS.md` to check if it (or somethi
 
 - **Loop breaker**: Same code modified >3 times → stop and reassess approach.
 - **Session drift guard**: >20 exchanges without completion → suggest new session with context summary.
+
+
+## 17. 文档记录边界（2026-11-22）
+
+从 [记录入口](docs/README.md)和 [active_plan](docs/active_plan.md)查当前状态。每轮迭代写依据、实际运行、证据、结论及下一步；[daily-log](docs/daily-log.md)只记录模型、训练、评估、指标口径或研究结论的关键变化，不记录日常核对流水。旧实验不覆盖，缺失证据标待核实。本地编写代码，Colab 执行训练与模型评估；训练仍遵守第 14 节授权规则。

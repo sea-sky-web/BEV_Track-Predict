@@ -638,3 +638,8 @@ previous result
 ```
 
 If an iteration cannot be connected to this chain, it should not be performed.
+
+
+## 文档入口补充（2026-11-22）
+
+[记录入口](README.md)与[迭代模板](iteration_records/TEMPLATE.md)连接本规范和当前行动。训练、独立评估、失败重试分别关联实际代码 SHA、配置、数据划分、checkpoint 和原始运行证据；历史缺档不补造成功记录。关键变化才写入 [daily-log](daily-log.md)。
