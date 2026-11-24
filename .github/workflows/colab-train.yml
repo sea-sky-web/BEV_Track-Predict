@@ -11,13 +11,17 @@ on:
         description: 'GPU 型号（T4 / L4 / A100）'
         default: 'T4'
         required: false
+      seed:
+        description: '训练随机种子'
+        default: '42'
+        required: false
       bev_pos_weight:
         description: 'BEV 正样本损失权重（MVDet 标准 MSE = 1.0）'
         default: '1.0'
         required: false
       max_frames:
-        description: '训练帧数上限（MVDet train split = 360）'
-        default: '360'
+        description: '训练帧数上限（train split = 320）'
+        default: '320'
         required: false
       loss_type:
         description: 'BEV loss 类型：mse (baseline) / focal (CenterNet-style)'
@@ -38,6 +42,10 @@ on:
       backbone:
         description: 'Backbone: resnet18 (MVDet baseline) / mobilenet_v2 (lightweight)'
         default: 'resnet18'
+        required: false
+      branch:
+        description: 'Git branch to checkout on Colab (default: workflow trigger branch)'
+        default: ''
         required: false
 
 jobs:
@@ -151,17 +159,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      # colab exec --timeout is inactivity timeout. Set high (7200s=2h) so long training
-      # doesn't disconnect. The step-level timeout-minutes=240 is the hard wall.
-      # continue-on-error lets download/eval steps run even if training times out.
+      # Give a full 10-epoch T4 train+eval run up to 4h in Colab and 5h in the
+      # runner step. The step preserves final artifacts before returning the
+      # real training/download status; later always() steps upload and clean up.
       - name: Run training and download results
-        timeout-minutes: 240
-        continue-on-error: true
+        timeout-minutes: 300
         run: |
           {
-            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}', '--loss_type', '${{ inputs.loss_type }}', '--offset_weight', '${{ inputs.offset_weight }}', '--fusion_mode', '${{ inputs.fusion_mode }}', '--backbone', '${{ inputs.backbone }}']"
+            BRANCH="${{ inputs.branch || github.ref_name }}"
+            echo "import sys; sys.argv = ['colab_train.py', '--epochs', '${{ inputs.epochs }}', '--bev_pos_weight', '${{ inputs.bev_pos_weight }}', '--max_frames', '${{ inputs.max_frames }}', '--loss_type', '${{ inputs.loss_type }}', '--offset_weight', '${{ inputs.offset_weight }}', '--fusion_mode', '${{ inputs.fusion_mode }}', '--backbone', '${{ inputs.backbone }}', '--seed', '${{ inputs.seed }}', '--branch', '${BRANCH}']"
             cat scripts/colab_train.py
-          } | colab exec -s bev-train --timeout 7200 > train_exec.log 2>&1 &
+          } | colab exec -s bev-train --timeout 14400 > train_exec.log 2>&1 &
           EXEC_PID=$!
 
           tail -f train_exec.log &
@@ -177,18 +185,51 @@ jobs:
             colab download -s bev-train "$REMOTE/eval_results.json" ./eval_results.json || true
           done
 
+          set +e
           wait $EXEC_PID
           EXEC_RET=$?
+          set -e
           kill $TAIL_PID 2>/dev/null || true
 
-          # 训练结束后的最终尝试（可能拿到最新结果；若失败，已有周期性备份兜底）
-          colab download -s bev-train "$REMOTE/eval_results.json"                                     ./eval_results.json   || true
-          colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/model_final.pth"         ./model_final.pth     || true
-          colab download -s bev-train "$REMOTE/train_multicam_mvdet_style_v3/metrics.csv"             ./metrics.csv         || true
-          colab download -s bev-train "$REMOTE/visualization/bev_prediction.png"                      ./bev_prediction.png  || true
-          colab download -s bev-train "$REMOTE/visualization/bev_overlay.png"                         ./bev_overlay.png     || true
+          # A successful train+eval must yield the checkpoint and evaluation JSON.
+          # If the final transfer fails but a periodic backup already exists, keep
+          # that verified non-empty local copy. Optional diagnostics only warn.
+          DOWNLOAD_RET=0
+          download_required() {
+            local remote_path="$1"
+            local local_path="$2"
+            if colab download -s bev-train "$remote_path" "$local_path"; then
+              return 0
+            fi
+            if [ -s "$local_path" ]; then
+              echo "[WARN] Final download failed; using periodic backup: $local_path"
+              return 0
+            fi
+            echo "[ERROR] Required artifact unavailable: $remote_path"
+            DOWNLOAD_RET=1
+          }
+          download_optional() {
+            local remote_path="$1"
+            local local_path="$2"
+            colab download -s bev-train "$remote_path" "$local_path" || \
+              echo "[WARN] Optional artifact unavailable: $remote_path"
+          }
 
-          exit $EXEC_RET
+          if [ "$EXEC_RET" -eq 0 ]; then
+            download_required "$REMOTE/eval_results.json" ./eval_results.json
+            download_required "$REMOTE/train_multicam_mvdet_style_v3/model_final.pth" ./model_final.pth
+          else
+            download_optional "$REMOTE/eval_results.json" ./eval_results.json
+            download_optional "$REMOTE/train_multicam_mvdet_style_v3/model_final.pth" ./model_final.pth
+          fi
+          download_optional "$REMOTE/train_multicam_mvdet_style_v3/metrics.csv" ./metrics.csv
+          download_optional "$REMOTE/visualization/bev_prediction.png" ./bev_prediction.png
+          download_optional "$REMOTE/visualization/bev_overlay.png" ./bev_overlay.png
+
+          if [ "$EXEC_RET" -ne 0 ]; then
+            exit "$EXEC_RET"
+          fi
+          exit "$DOWNLOAD_RET"
 
       - name: Print evaluation summary
         if: always()
@@ -225,6 +266,7 @@ jobs:
             eval_results.json
             bev_prediction.png
             bev_overlay.png
+            train_exec.log
           if-no-files-found: warn
 
       - name: Stop Colab session

@@ -56,6 +56,42 @@ from models import create_model
 from utils import build_gaussian_kernel_2d
 
 
+def load_gt_world_positions(ann_dir: Path, frame_start: int, n_frames: int) -> List[np.ndarray]:
+    """Load GT world-coordinate positions directly from annotation JSONs.
+
+    Returns a list of (N_i, 2) arrays in meters, one per frame.
+    Coordinates are (X_world, Y_world) matching the BEV grid convention:
+      X = ORIGINE_X + (ix + 0.5) * STEP
+      Y = ORIGINE_Y + (iy + 0.5) * STEP
+    where ix = positionID % NB_HEIGHT, iy = positionID // NB_HEIGHT.
+    """
+    from config import NB_HEIGHT, ORIGINE_X_M, ORIGINE_Y_M, STEP_M
+
+    ann_files = sorted(ann_dir.glob("*.json"))
+    result = []
+    for fi in range(frame_start, frame_start + n_frames):
+        if fi >= len(ann_files):
+            result.append(np.empty((0, 2), dtype=np.float64))
+            continue
+        data = json.loads(ann_files[fi].read_text(encoding="utf-8"))
+        positions = []
+        for obj in data:
+            pos_id = obj.get("positionID", None)
+            if pos_id is None:
+                continue
+            pos_id = int(pos_id)
+            ix = pos_id % NB_HEIGHT
+            iy = pos_id // NB_HEIGHT
+            xw = ORIGINE_X_M + (ix + 0.5) * STEP_M
+            yw = ORIGINE_Y_M + (iy + 0.5) * STEP_M
+            positions.append([xw, yw])
+        if positions:
+            result.append(np.array(positions, dtype=np.float64))
+        else:
+            result.append(np.empty((0, 2), dtype=np.float64))
+    return result
+
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description="Evaluate MVDet-like model (loss metrics + optional detection metrics)."
@@ -435,11 +471,19 @@ def evaluate_detection(
     min_distance: float,
     moda_dist_m: float,
     offset_maps: Sequence[torch.Tensor] | None = None,
+    gt_world_positions: Sequence[np.ndarray] | None = None,
+    origin_x_m: float = -3.0,
+    origin_y_m: float = -9.0,
 ) -> Tuple[List[Dict[str, float]], Dict[str, float]]:
     rows: List[Dict[str, float]] = []
-    if len(pred_maps) != len(gt_maps):
-        raise ValueError("pred_maps and gt_maps must have the same length.")
-    if offset_maps is not None and len(offset_maps) != len(pred_maps):
+    n_frames = len(pred_maps)
+    if gt_world_positions is not None:
+        if len(gt_world_positions) != n_frames:
+            raise ValueError("gt_world_positions and pred_maps must have the same length.")
+    else:
+        if len(gt_maps) != n_frames:
+            raise ValueError("pred_maps and gt_maps must have the same length.")
+    if offset_maps is not None and len(offset_maps) != n_frames:
         raise ValueError("offset_maps and pred_maps must have the same length.")
 
     for thr in thresholds:
@@ -449,7 +493,7 @@ def evaluate_detection(
         dist_sum = 0.0
         moda_rows: List[Dict[str, float]] = []
 
-        for idx, (pred_map, gt_map) in enumerate(zip(pred_maps, gt_maps)):
+        for idx, pred_map in enumerate(pred_maps):
             pred_pts = _extract_points(
                 pred_map,
                 thr,
@@ -460,26 +504,46 @@ def evaluate_detection(
             )
             pred_yx = pred_pts[:, :2] if pred_pts.size else np.empty((0, 2), dtype=np.float32)
 
-            gt_yx = _extract_gt_points(gt_map, nms_ksize=nms_ksize)
+            if gt_world_positions is not None:
+                gt_world = gt_world_positions[idx]
+                pred_world = np.empty((0, 2), dtype=np.float64)
+                if pred_yx.shape[0] > 0:
+                    pred_world = np.column_stack([
+                        origin_x_m + (pred_yx[:, 0] + 0.5) * bev_cell_m,
+                        origin_y_m + (pred_yx[:, 1] + 0.5) * bev_cell_m,
+                    ])
+                c_tp, c_fp, c_fn, c_dist = _match_points(
+                    pred_yx=pred_world, gt_yx=gt_world, dist_thr=moda_dist_m,
+                )
+                moda_rows.append(
+                    compute_moda_modp(pred_pts=pred_world, gt_pts=gt_world, d_thresh=moda_dist_m)
+                )
+            else:
+                gt_yx = _extract_gt_points(gt_maps[idx], nms_ksize=nms_ksize)
+                c_tp, c_fp, c_fn, c_dist = _match_points(
+                    pred_yx=pred_yx, gt_yx=gt_yx, dist_thr=dist_thr,
+                )
+                moda_rows.append(
+                    compute_moda_modp(
+                        pred_pts=pred_yx * bev_cell_m, gt_pts=gt_yx * bev_cell_m, d_thresh=moda_dist_m,
+                    )
+                )
 
-            c_tp, c_fp, c_fn, c_dist = _match_points(pred_yx=pred_yx, gt_yx=gt_yx, dist_thr=dist_thr)
             tp += c_tp
             fp += c_fp
             fn += c_fn
             dist_sum += c_dist
-            moda_rows.append(
-                compute_moda_modp(
-                    pred_pts=pred_yx * bev_cell_m,
-                    gt_pts=gt_yx * bev_cell_m,
-                    d_thresh=moda_dist_m,
-                )
-            )
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-        loc_err_px = dist_sum / tp if tp > 0 else float("nan")
-        loc_err_m = loc_err_px * bev_cell_m if np.isfinite(loc_err_px) else float("nan")
+        avg_match_dist = dist_sum / tp if tp > 0 else float("nan")
+        if gt_world_positions is not None:
+            loc_err_m = avg_match_dist
+            loc_err_px = avg_match_dist / bev_cell_m if np.isfinite(avg_match_dist) else float("nan")
+        else:
+            loc_err_px = avg_match_dist
+            loc_err_m = avg_match_dist * bev_cell_m if np.isfinite(avg_match_dist) else float("nan")
         moda_metrics = aggregate_metrics(moda_rows)
 
         rows.append(
@@ -690,6 +754,10 @@ def main() -> Dict[str, float]:
         thresholds = parse_thresholds(args.det_thresholds)
         bev_cell_m = step_m * args.bev_down
 
+        ann_dir = data_root / "annotations_positions"
+        gt_world_pos = load_gt_world_positions(ann_dir, args.frame_start, args.max_frames)
+        print(f"[GT] Loaded {len(gt_world_pos)} frames of world-coordinate GT from annotations")
+
         nms_radii = parse_min_distances(args.det_min_distances) if args.det_min_distances else [args.det_min_distance]
 
         global_best = None
@@ -708,6 +776,7 @@ def main() -> Dict[str, float]:
                 min_distance=nms_r,
                 moda_dist_m=args.det_moda_dist_m,
                 offset_maps=offset_maps if args.use_offset else None,
+                gt_world_positions=gt_world_pos,
             )
 
             if len(nms_radii) > 1:

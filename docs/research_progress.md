@@ -1,7 +1,19 @@
 # Lightweight Multi-View BEV Fusion: Research Progress
 
-> 最后更新：2026-07-14
+> 最后更新：2026-07-14（实验记录）/ 2026-09-02（审计声明）
 > 仓库：`sea-sky-web/BEV_Track-Predict`
+>
+> ⚠️ **结果有效性声明（2026-09-02）**：
+> 本文档中的头条数字（MODA 0.8950 等）经 `docs/paper_readiness_audit.md` 审计确认存在以下协议缺陷，**不可直接用于论文**：
+> 1. 检测阈值和 NMS 半径在测试集上通过 132 组网格扫描取 argmax（`src/evaluate_main.py:505,723`）
+> 2. 评估 GT 来自 `adaptive_max_pool2d` 池化热力图而非原始标注（`src/evaluate_main.py:294,392-399`）
+> 3. MODA（Hungarian + 0.5 m）和 P/R/F1（贪心 + 0.3 m）使用两套不同匹配器（`src/metrics.py:10-14` vs `src/evaluate_main.py:408-431`）
+> 4. 推理延迟/FPS 在未截断版 MobileNet-V2（8.0M）上测量，非产出 MODA 的截断版（5.7M）
+> 5. 单次运行、无种子、无误差棒（`src/train_main.py` 无 `torch.manual_seed`）
+>
+> 修复计划和优先级见 `docs/active_plan.md`。修复后所有数字将重跑并记录在新迭代中。
+> 本文档保留作为历史实验记录，不做修改。
+>
 > **Milestone: MODA 0.8950 — 超越 MVDet baseline (0.882)，参数量仅 5.7M (17.4%)**
 
 ---
@@ -293,11 +305,51 @@ docs/
 
 ## 9. 待完成实验
 
+> 更新：2026-09-02（审计后扩充）
+
+### P0 — 修复后必须重跑（协议缺陷）
+
 | 实验 | 目的 | 优先级 |
 |------|------|:------:|
+| 验证集（320–359）上固定超参选优 + 测试集单次评估 | 替代测试集调参（B1） | **P0** |
+| 世界坐标 GT 评估（替代池化 GT） | 修复 A3/A4 | **P0** |
+| 统一贪心匹配 + 0.5 m（替代双匹配器） | 修复 A4 | **P0** |
+| 常速度后向差分（替代中心差分） | 修复 C1（泄未来） | **P0** |
+| 统一阈值网格的 AUPRC | 修复 C3（尺度偏倚） | **P0** |
+| fig9 用真实 tracker 输出重新生成 | 修复 D2（合成数据） | **P0** |
+
+### P1 — 消融与对照补齐
+
+| 实验 | 目的 | 优先级 |
+|------|------|:------:|
+| 3–5 种子训练 + 方差统计 | 修复 B2（无误差棒） | P1 |
+| fusion↔head 解耦 + 2×2 消融网格 | 修复 B3（三重变量混淆） | P1 |
 | MobileNet-V2 + concat (gradient ckpt) | 控制变量：同 backbone 下 concat vs cv2 | P1 |
-| 截断版 MobileNet-V2 推理 benchmark | 更新推理速度数据 | P1 |
-| 多次训练方差统计 | 确认 MODA 0.8918 的置信区间 | P2 |
+| 5.7M 截断版 MobileNet-V2 推理 benchmark | 修复 B5（延迟/FPS 对齐） | P1 |
+| offset head 正确监督目标 | 修复 A1（训练到 0） | P1 |
+| batch>1 索引修复 | 修复 A2 | P1 |
+
+### P2 — 论文完整性与竞争力
+
+| 实验 | 目的 | 优先级 |
+|------|------|:------:|
+| 提高输入分辨率（1080×1920） | 修复 A8（特征平面虚高） | P2 |
+| 移除/改进无效 coverage_count 通道 | 修复 A7 | P2 |
+| 按 coverage_count 分层 + border_margin 分箱的 MODA 分解 | 几何先验诊断证据 | P2 |
+| MultiviewX 数据集 | 第二数据集验证 | P2 |
+| 基线更新（MVDeTr/SHOT/EarlyBird 公开数字） | Related Work 完整性 | P2 |
+| 文档补齐（experiment_protocol.md/evaluation_protocol.md/research-methodology.md） | 修复 D7 | P2 |
+| 冻结 artifact（tag + SHA256） | 修复 D8 | P2 |
+
+### P3 — 代码质量
+
+| 实验 | 目的 | 优先级 |
+|------|------|:------:|
+| focal 下 train/eval 一致 + 阈值区间自适应 | 修复 A5 | P3 |
+| hflip 警告或拒绝 | 修复 A9 | P3 |
+| 测试断言 allclose 替代 equal | 修复 A10 | P3 |
+| numpy 版本约束 | 修复 A11 | P3 |
+| 死代码清理 | 修复 A12 | P3 |
 
 ---
 

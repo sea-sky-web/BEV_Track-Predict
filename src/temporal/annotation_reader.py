@@ -111,10 +111,11 @@ def build_trajectories(frames: list[list[Detection]]) -> dict[int, Trajectory]:
 
 
 def compute_velocities(traj: Trajectory, dt: float = 1.0 / FRAME_RATE_HZ) -> np.ndarray:
-    """Compute per-detection velocity via finite differences.
+    """Compute per-detection velocity via backward finite differences.
 
-    Returns shape (N, 2) in m/s. Uses central diff for interior,
-    forward/backward for endpoints. Does not interpolate across frame gaps > 1.
+    Returns shape (N, 2) in m/s. Uses backward diff (pos[i] - pos[i-1]) / dt
+    for all points with a valid predecessor. First point uses forward diff
+    only if no backward neighbor. Does not interpolate across frame gaps > 1.
     """
     pos = traj.positions
     frames = np.array(traj.frame_indices, dtype=np.int64)
@@ -128,17 +129,9 @@ def compute_velocities(traj: Trajectory, dt: float = 1.0 / FRAME_RATE_HZ) -> np.
         if i == 0:
             if frames[1] - frames[0] == 1:
                 vel[0] = (pos[1] - pos[0]) / dt
-        elif i == n - 1:
-            if frames[-1] - frames[-2] == 1:
-                vel[-1] = (pos[-1] - pos[-2]) / dt
         else:
             gap_prev = frames[i] - frames[i - 1]
-            gap_next = frames[i + 1] - frames[i]
-            if gap_prev == 1 and gap_next == 1:
-                vel[i] = (pos[i + 1] - pos[i - 1]) / (2 * dt)
-            elif gap_prev == 1:
+            if gap_prev == 1:
                 vel[i] = (pos[i] - pos[i - 1]) / dt
-            elif gap_next == 1:
-                vel[i] = (pos[i + 1] - pos[i]) / dt
 
     return vel

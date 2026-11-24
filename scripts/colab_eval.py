@@ -110,6 +110,7 @@ def main():
     parser.add_argument("--loss_type", default="mse")
     parser.add_argument("--frame_start", type=int, default=360)
     parser.add_argument("--max_frames", type=int, default=40)
+    parser.add_argument("--branch", default="docs/paper-readiness-audit")
     args = parser.parse_args()
 
     # 1. Clone / pull
@@ -129,12 +130,19 @@ def main():
                 saved["outputs"] = tmp_out
             shutil.rmtree(str(REPO_DIR))
             run(["git", "clone", REPO_URL, str(REPO_DIR)])
+
             for name, tmp in saved.items():
                 dest = REPO_DIR / name
                 if not dest.exists():
                     shutil.move(str(tmp), str(dest))
         else:
             run(["git", "clone", REPO_URL, str(REPO_DIR)])
+
+    run(["git", "-C", str(REPO_DIR), "fetch", "origin", args.branch])
+    run(["git", "-C", str(REPO_DIR), "checkout", args.branch])
+    run(["git", "-C", str(REPO_DIR), "pull", "--ff-only"])
+    code_sha = subprocess.check_output(["git", "-C", str(REPO_DIR), "rev-parse", "HEAD"], text=True).strip()
+    print(f"[CODE] {code_sha}", flush=True)
 
     # 2. Download dataset
     banner("2/5  数据集准备")
@@ -212,7 +220,16 @@ def main():
         "--fusion_mode", args.fusion_mode,
     ]
     print("\n[VIZ] 生成可视化...", flush=True)
-    run(viz_cmd, cwd=str(REPO_DIR), check=False)
+    run(viz_cmd, cwd=str(REPO_DIR))
+
+    video_cmd = viz_cmd[:]
+    frame_pos = video_cmd.index("--frame")
+    del video_cmd[frame_pos:frame_pos + 2]
+    video_cmd.extend(["--video", "--frame_start", str(args.frame_start),
+                      "--max_frames", str(args.max_frames), "--fps", "5",
+                      "--det_threshold", "0.225"])
+    print("\n[VIDEO] 生成测试帧 BEV 视频...", flush=True)
+    run(video_cmd, cwd=str(REPO_DIR))
 
     print("\n[OK] 全部完成", flush=True)
 

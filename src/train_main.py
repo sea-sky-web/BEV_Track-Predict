@@ -169,6 +169,8 @@ def parse_args():
     # 日志和检查点
     ap.add_argument("--log_every", type=int, default=DEFAULT_LOG_EVERY,
                     help="每多少步打印日志")
+    ap.add_argument("--seed", type=int, default=42,
+                    help="Random seed for reproducibility")
     
     return ap.parse_args()
 
@@ -176,6 +178,13 @@ def parse_args():
 def main():
     """主函数"""
     args = parse_args()
+    
+    # 设置随机种子
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+    print(f"[SEED] seed={args.seed}")
     
     # 设置设备
     dev = torch.device(args.device)
@@ -312,6 +321,31 @@ def main():
     
     print(f"[DATA] len(ds)={len(ds)}, len(loader)={len(loader)}")
     
+    # ── 验证集（frames 320-359）──
+    val_ds = create_wildtrack_dataset(
+        data_root=data_root,
+        views=kept_views,
+        max_frames=40,
+        frame_start=320,
+        img_hw=(args.img_h, args.img_w),
+        feat_hw=(Hf, Wf),
+        bev_down=args.bev_down,
+        person_h_m=args.person_h,
+        unit_scale=unit_scale,
+        calib_cache=calib_cache,
+        augment=None,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=(dev.type == "cuda"),
+        drop_last=False,
+        collate_fn=collate_fn,
+    )
+    print(f"[DATA] val: len(val_ds)={len(val_ds)}, len(val_loader)={len(val_loader)}")
+    
     # ========== 4. 创建模型 ==========
     print("\n[MODEL] Creating model...")
     
@@ -414,6 +448,13 @@ def main():
               f"img={epoch_stats['img_loss']:.6f} "
               f"raw_pos_mse={epoch_stats['raw_pos_mse']:.6f} "
               f"snr={epoch_stats['snr']:.3f}")
+        
+        # 验证
+        val_stats = trainer.validate(val_loader, map_kernel, img_kernel, alpha=args.alpha)
+        print(f"[Val   {ep}] "
+              f"loss={val_stats['loss']:.6f} "
+              f"bev={val_stats['bev_loss']:.6f} "
+              f"snr={val_stats['snr']:.3f}")
         
         # 保存检查点（每轮更新 model_final.pth 防止超时中断）
         if (ep + 1) % 5 == 0:

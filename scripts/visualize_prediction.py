@@ -30,7 +30,8 @@ SCALE = 3
 
 
 def load_model_and_dataset(model_path, data_root, device="cuda",
-                           fusion_mode=DEFAULT_FUSION_MODE, backbone=DEFAULT_BACKBONE):
+                           fusion_mode=DEFAULT_FUSION_MODE, backbone=DEFAULT_BACKBONE,
+                           frame_start=0, max_frames=-1):
     from pathlib import Path
     data_root = Path(data_root)
     views = list(range(7))
@@ -64,7 +65,7 @@ def load_model_and_dataset(model_path, data_root, device="cuda",
     proj_mats = torch.stack(proj_mats, dim=0)
 
     ds = create_wildtrack_dataset(
-        data_root=data_root, views=views, max_frames=-1, frame_start=0,
+        data_root=data_root, views=views, max_frames=max_frames, frame_start=frame_start,
         img_hw=(DEFAULT_IMG_H, DEFAULT_IMG_W), feat_hw=feat_hw, bev_down=bev_down,
         person_h_m=DEFAULT_PERSON_H, unit_scale=unit_scale, calib_cache=calib_cache,
     )
@@ -84,7 +85,7 @@ def load_model_and_dataset(model_path, data_root, device="cuda",
     return model, ds, dev
 
 
-def render_frame(model, ds, dev, frame_idx):
+def render_frame(model, ds, dev, frame_idx, det_threshold=0.225, frame_start=0):
     """渲染单帧，返回 overlay 图 (H*SCALE, W*SCALE, 3) 和统计信息。"""
     stem, x_views, map_gt, imgs_gt = ds[frame_idx]
     x_views = x_views.unsqueeze(0).to(dev)
@@ -108,7 +109,7 @@ def render_frame(model, ds, dev, frame_idx):
 
     # 检测峰值
     local_max = maximum_filter(pred, size=5)
-    peaks = (pred == local_max) & (pred > 0.3)
+    peaks = (pred == local_max) & (pred > det_threshold)
     peak_points = np.argwhere(peaks)
 
     # Overlay: 预测热图 + GT 绿圈 + 检测红圈
@@ -123,13 +124,13 @@ def render_frame(model, ds, dev, frame_idx):
     # 添加帧信息文字
     n_gt = gt_points.shape[0]
     n_det = peak_points.shape[0]
-    info = f"Frame {frame_idx}  GT:{n_gt}  Det:{n_det}  logit:[{pred.min():.2f},{pred.max():.2f}]"
+    info = f"Frame {frame_start + frame_idx}  GT:{n_gt}  Det:{n_det}  logit:[{pred.min():.2f},{pred.max():.2f}]"
     cv2.putText(overlay_big, info, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
     return overlay_big, {"n_gt": n_gt, "n_det": n_det, "logit_max": pred.max()}
 
 
-def visualize_single(model, ds, dev, frame_idx, output_dir):
+def visualize_single(model, ds, dev, frame_idx, output_dir, det_threshold=0.225, frame_start=0):
     """生成单帧的 prediction + overlay 图。"""
     os.makedirs(output_dir, exist_ok=True)
 
@@ -174,7 +175,7 @@ def visualize_single(model, ds, dev, frame_idx, output_dir):
     cv2.imwrite(os.path.join(output_dir, "bev_prediction.png"), canvas)
 
     # Overlay
-    overlay_big, _ = render_frame(model, ds, dev, frame_idx)
+    overlay_big, _ = render_frame(model, ds, dev, frame_idx, det_threshold, frame_start)
     cv2.imwrite(os.path.join(output_dir, "bev_overlay.png"), overlay_big)
 
     print(f"[OK] Saved: bev_prediction.png, bev_overlay.png")
@@ -182,7 +183,8 @@ def visualize_single(model, ds, dev, frame_idx, output_dir):
     print(f"GT > 0.5: {(gt > 0.5).sum()} pixels")
 
 
-def visualize_video(model, ds, dev, output_dir, max_frames=-1, fps=5):
+def visualize_video(model, ds, dev, output_dir, max_frames=-1, fps=5,
+                    det_threshold=0.225, frame_start=0):
     """生成所有帧的 BEV 预测视频。"""
     os.makedirs(output_dir, exist_ok=True)
     n_frames = len(ds) if max_frames < 0 else min(max_frames, len(ds))
@@ -197,10 +199,12 @@ def visualize_video(model, ds, dev, output_dir, max_frames=-1, fps=5):
 
     try:
         for i in range(n_frames):
-            frame, info = render_frame(model, ds, dev, i)
+            frame, info = render_frame(model, ds, dev, i, det_threshold, frame_start)
             if writer is None:
                 fh, fw = frame.shape[:2]
                 writer = cv2.VideoWriter(video_path, fourcc, fps, (fw, fh))
+                if not writer.isOpened():
+                    raise RuntimeError(f"Could not open video writer: {video_path}")
             writer.write(frame)
             if (i + 1) % 50 == 0 or i == n_frames - 1:
                 print(f"  [{i+1}/{n_frames}] GT={info['n_gt']} Det={info['n_det']} logit_max={info['logit_max']:.3f}")
@@ -223,14 +227,22 @@ if __name__ == "__main__":
     parser.add_argument("--video", action="store_true", help="生成所有帧的 BEV 预测视频")
     parser.add_argument("--max_frames", type=int, default=-1, help="视频最大帧数（-1=全部）")
     parser.add_argument("--fps", type=int, default=5)
+    parser.add_argument("--frame_start", type=int, default=0)
+    parser.add_argument("--det_threshold", type=float, default=0.225)
     parser.add_argument("--fusion_mode", default=DEFAULT_FUSION_MODE)
     parser.add_argument("--backbone", default=DEFAULT_BACKBONE)
     args = parser.parse_args()
 
+    if args.fps <= 0 or args.frame_start < 0 or args.max_frames == 0:
+        parser.error("fps must be positive, frame_start nonnegative, and max_frames nonzero")
+
     model, ds, dev = load_model_and_dataset(
-        args.model_path, args.data_root, args.device, args.fusion_mode, args.backbone)
+        args.model_path, args.data_root, args.device, args.fusion_mode, args.backbone,
+        args.frame_start, args.max_frames if args.video else -1)
 
     if args.video:
-        visualize_video(model, ds, dev, args.output, args.max_frames, args.fps)
+        visualize_video(model, ds, dev, args.output, args.max_frames, args.fps,
+                        args.det_threshold, args.frame_start)
     else:
-        visualize_single(model, ds, dev, args.frame, args.output)
+        visualize_single(model, ds, dev, args.frame, args.output,
+                         args.det_threshold, args.frame_start)

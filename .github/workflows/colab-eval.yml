@@ -18,6 +18,10 @@ on:
         description: 'Backbone 网络'
         default: 'mobilenet_v2'
         required: false
+      branch:
+        description: 'Colab 上检出的代码分支'
+        default: 'docs/paper-readiness-audit'
+        required: false
 
 jobs:
   eval:
@@ -138,7 +142,7 @@ jobs:
         timeout-minutes: 60
         run: |
           {
-            echo "import sys; sys.argv = ['colab_eval.py', '--model_path', 'outputs/train_multicam_mvdet_style_v3/model_final.pth', '--fusion_mode', '${{ inputs.fusion_mode }}', '--backbone', '${{ inputs.backbone }}']"
+            echo "import sys; sys.argv = ['colab_eval.py', '--model_path', 'outputs/train_multicam_mvdet_style_v3/model_final.pth', '--fusion_mode', '${{ inputs.fusion_mode }}', '--backbone', '${{ inputs.backbone }}', '--branch', '${{ inputs.branch }}']"
             cat scripts/colab_eval.py
           } | colab exec -s bev-eval --timeout 3600
 
@@ -149,6 +153,7 @@ jobs:
           colab download -s bev-eval "$REMOTE/eval_results.json"                  ./eval_results.json    || true
           colab download -s bev-eval "$REMOTE/visualization/bev_prediction.png"   ./bev_prediction.png   || true
           colab download -s bev-eval "$REMOTE/visualization/bev_overlay.png"      ./bev_overlay.png      || true
+          colab download -s bev-eval "$REMOTE/visualization/bev_prediction.mp4"   ./bev_prediction.mp4   || true
 
       - name: Print results summary
         if: always()
@@ -185,6 +190,7 @@ jobs:
             eval_results.json
             bev_prediction.png
             bev_overlay.png
+            bev_prediction.mp4
           if-no-files-found: warn
 
       - name: Stop Colab session

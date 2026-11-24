@@ -34,3 +34,5 @@
 - `src/evaluate_main.py`（评估）
 
 当前默认链路为 ResNet-18 pretrained backbone、`confidence_v2` fusion、Adam + cosine、全 7 视角、全帧训练。
+
+BEV 视频：`visualize_prediction.py --model_path <checkpoint> --data_root <WildTrack> --backbone mobilenet_v2 --fusion_mode geo_confidence_v1 --video --frame_start 360 --max_frames 40 --fps 5`。输出 `outputs/visualization/bev_prediction.mp4`。Colab eval-only workflow 也会生成并上传该文件。先用相同参数生成单帧图确认 checkpoint 可加载；视频中的红点是定性可视化峰值，不能代替正式检测评估指标。
